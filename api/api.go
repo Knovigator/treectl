@@ -20,17 +20,9 @@ func GetMessages(backendURL, accessToken, client, uid string, messageIDs []strin
 		queryParams.Add("ids[]", id)
 	}
 
-	// convert url.Values to map[string]string
-	queryMap := make(map[string]string)
-	for key, values := range queryParams {
-		if len(values) > 0 {
-			queryMap[key] = values[0]
-		}
-	}
-
 	// make the request
 	resp, err := restyClient.R().
-		SetQueryParams(queryMap).
+		SetQueryParamsFromValues(queryParams).
 		SetHeader("accept", "application/json").
 		SetHeader("Content-Type", "application/json").
 		SetHeader("access-token", accessToken).
