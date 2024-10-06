@@ -13,8 +13,8 @@ import (
 
 var rootCmd = &cobra.Command{
 	Use:   "treectl",
-	Short: "treectl is a CLI for managing your tree",
-	Long:  `A CLI application for interacting with and managing your tree-related tasks and data.`,
+	Short: "treectl controls Treechat",
+	Long:  `A CLI application for interacting with Treechat.`,
 }
 
 func init() {
