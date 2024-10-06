@@ -123,7 +123,15 @@ func (m *Message) ToASCII() string {
 			userName = name
 		}
 	}
-	return fmt.Sprintf("%s: %s\n", userName, m.Content)
+	output := fmt.Sprintf("%s: %s", userName, m.Content)
+
+	if url, ok := m.Extra["url"].(map[string]interface{}); ok {
+		if address, ok := url["address"].(string); ok {
+			output += fmt.Sprintf(" %s", address)
+		}
+	}
+
+	return output + "\n"
 }
 
 // ToASCII returns a human-readable representation of a Thread
