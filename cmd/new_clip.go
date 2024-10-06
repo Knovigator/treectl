@@ -2,6 +2,10 @@ package cmd
 
 import (
 	"fmt"
+	"mime"
+	"os" // added import for os package
+	"path/filepath"
+	"strings"
 
 	"github.com/Knovigator/knovigator/treectl/api"
 
@@ -12,21 +16,24 @@ import (
 var newClipCmd = &cobra.Command{
 	Use:   "clip <url>",
 	Short: "Create a new clip",
-	Long:  `Create a new clip from a URL.`,
-	Args:  cobra.ExactArgs(1),
+	Long:  `Create a new clip from a URL or with an attachment.`,
+	Args:  cobra.MaximumNArgs(1),
 	Run:   runNewClip,
 }
 
 var content string
-var title string
+var attachment string
 
 func init() {
 	newClipCmd.Flags().StringVarP(&content, "content", "c", "", "Additional content for the clip")
-	newClipCmd.Flags().StringVarP(&title, "title", "t", "", "Title for the clip")
+	newClipCmd.Flags().StringVarP(&attachment, "attachment", "f", "", "Path to the file to attach")
 }
 
 func runNewClip(cmd *cobra.Command, args []string) {
-	url := args[0]
+	var url string
+	if len(args) > 0 {
+		url = args[0]
+	}
 
 	// load credentials from viper config
 	accessToken := viper.GetString("access_token")
@@ -46,16 +53,37 @@ func runNewClip(cmd *cobra.Command, args []string) {
 		"id":   "PSEUDOSTREAM__CLIPS",
 	}
 
+	var image, video, file []byte
+	var err error
+
+	if attachment != "" {
+		fileContent, err := os.ReadFile(attachment)
+		if err != nil {
+			fmt.Printf("Error reading attachment file: %v\n", err)
+			return
+		}
+
+		mimeType := getMimeType(attachment)
+		switch {
+		case strings.HasPrefix(mimeType, "image/"):
+			image = fileContent
+		case strings.HasPrefix(mimeType, "video/"):
+			video = fileContent
+		default:
+			file = fileContent
+		}
+	}
+
 	result, err := api.ClipLink(
 		backendURL,
 		accessToken,
 		client,
 		uid,
 		url,
-		nil, // image
-		nil, // video
-		nil, // file
-		title,
+		image,
+		video,
+		file,
+		"",
 		content,
 		destination,
 	)
@@ -64,12 +92,16 @@ func runNewClip(cmd *cobra.Command, args []string) {
 		fmt.Println("Error creating clip:", err)
 		return
 	} else {
-		fmt.Printf("Clip created successfully: http://home.treechat.ai/quest/%s\n", result["id"])
-		// collect and print keys of result
-		// keys := []string{}
-		// for key := range result {
-		// 	keys = append(keys, key)
-		// }
-		// fmt.Println("Keys of result:", keys)
+		fmt.Printf("Clip created successfully. See it at: http://home.treechat.ai/quest/%s\n", result["id"])
 	}
+}
+
+func getMimeType(filePath string) string {
+	ext := filepath.Ext(filePath)
+	mimeType := mime.TypeByExtension(ext)
+	if mimeType == "" {
+		// If the MIME type is not found, default to application/octet-stream
+		mimeType = "application/octet-stream"
+	}
+	return mimeType
 }
