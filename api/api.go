@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -76,4 +77,77 @@ func GetThread(backendURL, threadID, accessToken, client, uid string) (map[strin
 	}
 
 	return threadInfo, nil
+}
+
+func ClipLink(
+	backendURL string,
+	accessToken string,
+	client string,
+	uid string,
+	url string,
+	image []byte,
+	video []byte,
+	file []byte,
+	title string,
+	content string,
+	destination map[string]interface{},
+) (map[string]interface{}, error) {
+	restyClient := resty.New()
+
+	form := map[string]string{}
+
+	if url != "" {
+		form["quest[answers_attributes][0][url_attributes][address]"] = url
+		form["quest[answers_attributes][0][url_attributes][title]"] = title
+	} else if title != "" {
+		form["quest[answers_attributes][0][url_attributes][title]"] = title
+	}
+
+	if content != "" {
+		form["quest[answers_attributes][0][content]"] = content
+	}
+
+	if destination != nil {
+		if destType, ok := destination["type"].(string); ok {
+			form["destination[type]"] = destType
+		}
+		if destID, ok := destination["id"].(float64); ok {
+			form["destination[id]"] = fmt.Sprintf("%d", int(destID))
+		}
+	}
+
+	req := restyClient.R().
+		SetHeader("accept", "application/json").
+		SetHeader("access-token", accessToken).
+		SetHeader("client", client).
+		SetHeader("uid", uid).
+		SetFormData(form)
+
+	if len(image) > 0 {
+		req.SetFileReader("quest[answers_attributes][0][images]", "image", bytes.NewReader(image))
+	}
+	if len(video) > 0 {
+		req.SetFileReader("quest[answers_attributes][0][recording]", "video", bytes.NewReader(video))
+	}
+	if len(file) > 0 {
+		req.SetFileReader("quest[answers_attributes][0][files]", "file", bytes.NewReader(file))
+	}
+
+	resp, err := req.Post(fmt.Sprintf("%s/plugin_new/clip", backendURL))
+
+	if err != nil {
+		return nil, fmt.Errorf("error making request: %v", err)
+	}
+
+	if resp.StatusCode() != http.StatusOK {
+		return nil, fmt.Errorf("received status code %d: %s", resp.StatusCode(), resp.Body())
+	}
+
+	var clipInfo map[string]interface{}
+	err = json.Unmarshal(resp.Body(), &clipInfo)
+	if err != nil {
+		return nil, fmt.Errorf("error parsing response: %v", err)
+	}
+
+	return clipInfo, nil
 }
