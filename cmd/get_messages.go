@@ -18,8 +18,10 @@ var getMessagesCmd = &cobra.Command{
 	Run:     runGetMessages,
 }
 
+var outputFormat string
+
 func init() {
-	// no flags needed for this command
+	getMessagesCmd.Flags().StringVarP(&outputFormat, "output", "o", "ascii", "Output format: ascii or json")
 }
 
 func runGetMessages(cmd *cobra.Command, args []string) {
@@ -42,12 +44,29 @@ func runGetMessages(cmd *cobra.Command, args []string) {
 		return
 	}
 
-	// pretty print the messages info
-	prettyJSON, err := json.MarshalIndent(messagesInfo, "", "  ")
-	if err != nil {
-		fmt.Printf("Error formatting JSON: %v\n", err)
-		return
+	switch outputFormat {
+	case "json":
+		// pretty print the messages info
+		prettyJSON, err := json.MarshalIndent(messagesInfo, "", "  ")
+		if err != nil {
+			fmt.Printf("Error formatting JSON: %v\n", err)
+			return
+		}
+		fmt.Println(string(prettyJSON))
+	case "ascii":
+		if answers, ok := messagesInfo["answers"].([]interface{}); ok {
+			for _, answer := range answers {
+				if answerMap, ok := answer.(map[string]interface{}); ok {
+					message := api.Message{
+						ID:      answerMap["id"].(string),
+						Content: answerMap["content"].(string),
+						Extra:   answerMap,
+					}
+					fmt.Println(message.ToASCII())
+				}
+			}
+		}
+	default:
+		fmt.Printf("Invalid output format: %s. Use 'ascii' or 'json'.\n", outputFormat)
 	}
-
-	fmt.Println(string(prettyJSON))
 }

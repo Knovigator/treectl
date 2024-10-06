@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 )
 
 type Thread struct {
@@ -112,4 +113,44 @@ func (mr *MessagesResponse) UnmarshalJSON(data []byte) error {
 	mr.Extra = temp
 
 	return nil
+}
+
+// ToASCII returns a human-readable representation of a Message
+func (m *Message) ToASCII() string {
+	userName := "Unknown User"
+	if user, ok := m.Extra["user"].(map[string]interface{}); ok {
+		if name, ok := user["name"].(string); ok {
+			userName = name
+		}
+	}
+	return fmt.Sprintf("%s: %s\n", userName, m.Content)
+}
+
+// ToASCII returns a human-readable representation of a Thread
+func (t *Thread) ToASCII() string {
+	var output strings.Builder
+
+	if parent, ok := t.Quest["parent"].(map[string]interface{}); ok {
+		parentMessage := Message{
+			ID:      parent["id"].(string),
+			Content: parent["content"].(string),
+			Extra:   parent,
+		}
+		output.WriteString(parentMessage.ToASCII())
+	}
+
+	if sortedAnswers, ok := t.Quest["sorted_answers"].([]interface{}); ok {
+		for _, answer := range sortedAnswers {
+			if answerMap, ok := answer.(map[string]interface{}); ok {
+				message := Message{
+					ID:      answerMap["id"].(string),
+					Content: answerMap["content"].(string),
+					Extra:   answerMap,
+				}
+				output.WriteString(message.ToASCII())
+			}
+		}
+	}
+
+	return output.String()
 }

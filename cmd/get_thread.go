@@ -21,8 +21,11 @@ var getThreadCmd = &cobra.Command{
 
 var noRehydrate bool
 
+// var outputFormat string
+
 func init() {
 	getThreadCmd.Flags().BoolVarP(&noRehydrate, "no-rehydrate", "n", false, "Do not rehydrate answers into the thread")
+	getThreadCmd.Flags().StringVarP(&outputFormat, "output", "o", "ascii", "Output format: ascii or json")
 }
 
 func runGetThread(cmd *cobra.Command, args []string) {
@@ -53,14 +56,21 @@ func runGetThread(cmd *cobra.Command, args []string) {
 		}
 	}
 
-	// pretty print the thread info
-	prettyJSON, err := json.MarshalIndent(threadInfo, "", "  ")
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error formatting JSON: %v\n", err)
-		return
+	switch outputFormat {
+	case "json":
+		// pretty print the thread info
+		prettyJSON, err := json.MarshalIndent(threadInfo, "", "  ")
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error formatting JSON: %v\n", err)
+			return
+		}
+		fmt.Println(string(prettyJSON))
+	case "ascii":
+		thread := api.Thread{Quest: threadInfo["quest"].(map[string]interface{})}
+		fmt.Println(thread.ToASCII())
+	default:
+		fmt.Printf("Invalid output format: %s. Use 'ascii' or 'json'.\n", outputFormat)
 	}
-
-	fmt.Println(string(prettyJSON))
 }
 
 func hydrateAnswersIntoQuest(quest map[string]interface{}, backendURL, accessToken, client, uid string) (map[string]interface{}, error) {
