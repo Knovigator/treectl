@@ -29,6 +29,7 @@ func init() {
 	rootCmd.AddCommand(cmd.OnboardCmd)
 	rootCmd.AddCommand(cmd.SkillsCmd)
 	rootCmd.InitDefaultCompletionCmd()
+	configureCompletionHelp()
 }
 
 func initConfig() {
@@ -55,5 +56,30 @@ func main() {
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Println(err)
 		os.Exit(1)
+	}
+}
+
+func configureCompletionHelp() {
+	completionCmd, _, err := rootCmd.Find([]string{"completion"})
+	if err != nil || completionCmd == nil {
+		return
+	}
+
+	completionCmd.Long = `Generate the autocompletion script for the specified shell.
+
+For bash and zsh, you can turn completions on immediately in your current shell with:
+
+	source <(treectl completion $(basename "$SHELL"))
+
+If you want persistent completions, see each shell subcommand's help for install details.`
+	completionCmd.Example = "  source <(treectl completion $(basename \"$SHELL\"))\n" +
+		"  treectl completion bash\n" +
+		"  treectl completion zsh"
+
+	for _, completionChild := range completionCmd.Commands() {
+		switch completionChild.Name() {
+		case "bash", "zsh":
+			completionChild.Example = fmt.Sprintf("  source <(treectl completion %s)", completionChild.Name())
+		}
 	}
 }
