@@ -43,6 +43,17 @@ var actionTagsCmd = &cobra.Command{
 	Run:   runActionTags,
 }
 
+var actionStatusCmd = &cobra.Command{
+	Use:   "status",
+	Short: "Check an existing action result by answer or thread id",
+	Long:  "Check an existing action answer by answer id or by the thread/quest id that owns it. Use --watch to keep polling until it completes, fails, or times out.",
+	Example: "  treectl action status --answer aeaacf68-d1a7-4f78-8fb0-a39c66ca1cc7\n" +
+		"  treectl action status --thread ec587036-f0f8-423a-8ffb-12658f7ac3ce\n" +
+		"  treectl action status --answer aeaacf68-d1a7-4f78-8fb0-a39c66ca1cc7 --watch",
+	Args: cobra.NoArgs,
+	Run:  runActionStatus,
+}
+
 var postUrl string
 var postAttachment string
 var postStream string
@@ -67,6 +78,13 @@ var actionAllowUnknownTag bool
 var actionOutputFormat string
 var actionPollInterval time.Duration
 var actionTimeout time.Duration
+var actionNoWait bool
+var actionStatusAnswerID string
+var actionStatusThreadID string
+var actionStatusWatch bool
+var actionStatusOutputFormat string
+var actionStatusPollInterval time.Duration
+var actionStatusTimeout time.Duration
 
 type rootThreadCreateOptions struct {
 	Content     string
@@ -100,6 +118,11 @@ type actionSpinner struct {
 	done chan struct{}
 }
 
+type actionSubmission struct {
+	ThreadID string
+	Answer   api.Answer
+}
+
 func init() {
 	newPostCmd.Flags().StringVarP(&postUrl, "url", "u", "", "Optional URL for the post")
 	newPostCmd.Flags().StringVarP(&postAttachment, "attachment", "f", "", "Path to the file to attach")
@@ -129,8 +152,16 @@ func init() {
 	ActionCmd.Flags().StringVarP(&actionOutputFormat, "output", "o", "json", "Output format: ascii or json")
 	ActionCmd.Flags().DurationVar(&actionPollInterval, "poll-interval", 3*time.Second, "Polling interval while waiting for generated media")
 	ActionCmd.Flags().DurationVar(&actionTimeout, "timeout", 10*time.Minute, "Maximum time to wait for generated media")
+	ActionCmd.Flags().BoolVar(&actionNoWait, "no-wait", false, "Submit the action and return immediately without polling")
 	_ = ActionCmd.Flags().MarkHidden("thread")
+	actionStatusCmd.Flags().StringVar(&actionStatusAnswerID, "answer", "", "Check the action result for this answer id")
+	actionStatusCmd.Flags().StringVar(&actionStatusThreadID, "thread", "", "Check the action result for this thread/quest id")
+	actionStatusCmd.Flags().BoolVar(&actionStatusWatch, "watch", false, "Keep polling until the action completes, fails, or times out")
+	actionStatusCmd.Flags().StringVarP(&actionStatusOutputFormat, "output", "o", "json", "Output format: ascii or json")
+	actionStatusCmd.Flags().DurationVar(&actionStatusPollInterval, "poll-interval", 3*time.Second, "Polling interval while waiting in watch mode")
+	actionStatusCmd.Flags().DurationVar(&actionStatusTimeout, "timeout", 10*time.Minute, "Maximum time to wait in watch mode")
 	ActionCmd.AddCommand(actionTagsCmd)
+	ActionCmd.AddCommand(actionStatusCmd)
 }
 
 func runNewPost(cmd *cobra.Command, args []string) {
@@ -249,7 +280,7 @@ func runAction(cmd *cobra.Command, args []string) {
 		privateValue = &actionPrivate
 	}
 
-	actionResult, err := createAndPollAction(
+	actionResult, err := createAndMaybePollAction(
 		cmd,
 		profile,
 		invocation,
@@ -262,6 +293,54 @@ func runAction(cmd *cobra.Command, args []string) {
 	}
 
 	printActionResult(actionResult, actionOutputFormat)
+}
+
+func runActionStatus(cmd *cobra.Command, args []string) {
+	if strings.TrimSpace(actionStatusAnswerID) == "" && strings.TrimSpace(actionStatusThreadID) == "" {
+		fmt.Println("Error: pass either --answer <answer-id> or --thread <quest-id>.")
+		return
+	}
+	if strings.TrimSpace(actionStatusAnswerID) != "" && strings.TrimSpace(actionStatusThreadID) != "" {
+		fmt.Println("Error: pass only one of --answer or --thread.")
+		return
+	}
+	if actionStatusPollInterval <= 0 {
+		fmt.Println("Error: --poll-interval must be greater than zero.")
+		return
+	}
+	if actionStatusTimeout <= 0 {
+		fmt.Println("Error: --timeout must be greater than zero.")
+		return
+	}
+
+	profile, err := requireAuthenticatedProfile()
+	if err != nil {
+		fmt.Println("Error:", err)
+		return
+	}
+
+	result, err := fetchActionStatus(profile, strings.TrimSpace(actionStatusThreadID), strings.TrimSpace(actionStatusAnswerID))
+	if err != nil {
+		fmt.Println("Error:", err)
+		return
+	}
+
+	if actionStatusWatch && result.Status == "pending" {
+		result, err = pollActionResult(
+			profile,
+			result.ThreadID,
+			result.AnswerID,
+			actionStatusOutputFormat,
+			actionStatusTimeout,
+			actionStatusPollInterval,
+		)
+		if err != nil {
+			fmt.Println("Error:", err)
+			return
+		}
+	}
+
+	printActionResult(result, actionStatusOutputFormat)
 }
 
 func createRootThread(profile profileConfig, options rootThreadCreateOptions) (api.CreateQuestResponse, error) {
@@ -646,17 +725,43 @@ func completeActionArgs(cmd *cobra.Command, args []string, toComplete string) ([
 	return completions, cobra.ShellCompDirectiveNoFileComp
 }
 
-func createAndPollAction(
+func createAndMaybePollAction(
 	cmd *cobra.Command,
 	profile profileConfig,
 	invocation actionInvocation,
 	publicValue *bool,
 	privateValue *bool,
 ) (actionResult, error) {
+	submission, err := createActionSubmission(cmd, profile, invocation, publicValue, privateValue)
+	if err != nil {
+		return actionResult{}, err
+	}
+
+	if actionNoWait {
+		return actionResultFromAnswer(profile, submission.ThreadID, submission.Answer), nil
+	}
+
+	return pollActionResult(
+		profile,
+		submission.ThreadID,
+		submission.Answer.ID,
+		actionOutputFormat,
+		actionTimeout,
+		actionPollInterval,
+	)
+}
+
+func createActionSubmission(
+	cmd *cobra.Command,
+	profile profileConfig,
+	invocation actionInvocation,
+	publicValue *bool,
+	privateValue *bool,
+) (actionSubmission, error) {
 	if strings.TrimSpace(actionReplyTo) != "" {
 		err := rejectRootOnlyPostFlags(cmd, actionReplyTo)
 		if err != nil {
-			return actionResult{}, err
+			return actionSubmission{}, err
 		}
 
 		replyResult, err := createReply(
@@ -670,14 +775,18 @@ func createAndPollAction(
 			},
 		)
 		if err != nil {
-			return actionResult{}, fmt.Errorf("creating action reply: %w", err)
+			return actionSubmission{}, fmt.Errorf("creating action reply: %w", err)
 		}
 
 		threadID := replyResult.Answer.QuestID
 		if threadID == "" && replyResult.Quest != nil {
 			threadID = replyResult.Quest.ID
 		}
-		return pollActionResult(profile, threadID, replyResult.Answer.ID)
+
+		return actionSubmission{
+			ThreadID: threadID,
+			Answer:   replyResult.Answer,
+		}, nil
 	}
 
 	createResult, err := createRootThread(
@@ -695,48 +804,119 @@ func createAndPollAction(
 		},
 	)
 	if err != nil {
-		return actionResult{}, fmt.Errorf("creating action thread: %w", err)
+		return actionSubmission{}, fmt.Errorf("creating action thread: %w", err)
 	}
 
 	if createResult.Quest.Parent == nil || createResult.Quest.Parent.ID == "" {
-		return actionResult{}, fmt.Errorf("action thread was created without a root answer id")
+		return actionSubmission{}, fmt.Errorf("action thread was created without a root answer id")
 	}
 
-	return pollActionResult(profile, createResult.Quest.ID, createResult.Quest.Parent.ID)
+	return actionSubmission{
+		ThreadID: createResult.Quest.ID,
+		Answer:   *createResult.Quest.Parent,
+	}, nil
 }
 
-func pollActionResult(profile profileConfig, threadID string, answerID string) (actionResult, error) {
+func pollActionResult(
+	profile profileConfig,
+	threadID string,
+	answerID string,
+	outputFormat string,
+	timeout time.Duration,
+	pollInterval time.Duration,
+) (actionResult, error) {
 	spinner := startActionSpinner(answerID)
 	if spinner != nil {
 		defer spinner.Stop()
-	} else if actionOutputFormat == "ascii" {
-		fmt.Printf("Created action in thread %s. Polling answer %s for generated media...\n", threadID, answerID)
+	} else if outputFormat == "ascii" {
+		fmt.Printf("Polling answer %s in thread %s for generated media...\n", answerID, threadID)
 	}
 
 	answerResult, timedOut, err := waitForGeneratedMedia(
 		profile,
 		answerID,
-		actionTimeout,
-		actionPollInterval,
+		timeout,
+		pollInterval,
 	)
 	if err != nil {
 		return actionResult{}, fmt.Errorf("polling action result: %w", err)
 	}
 
-	result := actionResult{
-		Status:        answerResult.Answer.GenerationStatus(),
-		ThreadID:      threadID,
-		AnswerID:      answerResult.Answer.ID,
-		ThreadURL:     threadLink(profile, threadID),
-		MediaURLs:     answerResult.Answer.CanonicalMediaURLs(profile.BackendURL),
-		FailureReason: answerResult.Answer.GenerationFailureReason(),
-	}
+	result := actionResultFromAnswer(profile, threadID, answerResult.Answer)
 
 	if timedOut {
 		result.Status = "pending"
 	}
 
 	return result, nil
+}
+
+func fetchActionStatus(profile profileConfig, threadID string, answerID string) (actionResult, error) {
+	if strings.TrimSpace(answerID) != "" {
+		answerResult, err := api.GetAnswer(
+			profile.BackendURL,
+			answerID,
+			profile.AccessToken,
+			profile.Client,
+			profile.UID,
+		)
+		if err != nil {
+			return actionResult{}, fmt.Errorf("loading answer %s: %w", answerID, err)
+		}
+
+		resolvedThreadID := strings.TrimSpace(threadID)
+		if resolvedThreadID == "" {
+			resolvedThreadID = strings.TrimSpace(answerResult.Answer.QuestID)
+		}
+
+		return actionResultFromAnswer(profile, resolvedThreadID, answerResult.Answer), nil
+	}
+
+	threadResult, err := api.GetThread(
+		profile.BackendURL,
+		threadID,
+		profile.AccessToken,
+		profile.Client,
+		profile.UID,
+	)
+	if err != nil {
+		return actionResult{}, fmt.Errorf("loading thread %s: %w", threadID, err)
+	}
+
+	answer, err := deriveThreadStatusAnswer(threadResult.Quest)
+	if err != nil {
+		return actionResult{}, err
+	}
+
+	return actionResultFromAnswer(profile, threadResult.Quest.ID, answer), nil
+}
+
+func deriveThreadStatusAnswer(quest api.Quest) (api.Answer, error) {
+	if quest.Parent != nil && strings.TrimSpace(quest.Parent.ID) != "" {
+		return *quest.Parent, nil
+	}
+
+	if len(quest.SortedAnswers) > 0 && strings.TrimSpace(quest.SortedAnswers[0].ID) != "" {
+		return quest.SortedAnswers[0], nil
+	}
+
+	return api.Answer{}, fmt.Errorf("thread %s does not have a readable answer to inspect", quest.ID)
+}
+
+func actionResultFromAnswer(profile profileConfig, threadID string, answer api.Answer) actionResult {
+	resolvedThreadID := strings.TrimSpace(threadID)
+	if resolvedThreadID == "" {
+		resolvedThreadID = strings.TrimSpace(answer.QuestID)
+	}
+
+	return actionResult{
+		Status:        answer.GenerationStatus(),
+		ThreadID:      resolvedThreadID,
+		AnswerID:      answer.ID,
+		ThreadURL:     threadLink(profile, resolvedThreadID),
+		MediaURLs:     answer.CanonicalMediaURLs(profile.BackendURL),
+		FailureReason: answer.GenerationFailureReason(),
+	}
 }
 
 func startActionSpinner(answerID string) *actionSpinner {
