@@ -30,8 +30,9 @@ var ActionCmd = &cobra.Command{
 		"  treectl action !kling \"camera orbit around a bonsai tree\"\n" +
 		"  treectl action \"!veo3 slow dolly through a neon alley\"\n" +
 		"  treectl action --reply-to 7a5e85c9-9dca-4140-ba9a-f5db0030afca flux \"make this warmer\"",
-	Args: cobra.MinimumNArgs(1),
-	Run:  runAction,
+	Args:              cobra.MinimumNArgs(1),
+	Run:               runAction,
+	ValidArgsFunction: completeActionArgs,
 }
 
 var actionTagsCmd = &cobra.Command{
@@ -429,7 +430,7 @@ func runActionTags(cmd *cobra.Command, args []string) {
 		return
 	}
 
-	models, err := api.ListAIModels(profile.BackendURL, profile.AccessToken, profile.Client, profile.UID)
+	models, err := fetchVisibleActionModels(profile)
 	if err != nil {
 		fmt.Println("Error loading action tags:", err)
 		return
@@ -551,7 +552,7 @@ func parseActionInvocation(args []string) (actionInvocation, error) {
 }
 
 func fetchKnownActionTags(profile profileConfig) (map[string]bool, error) {
-	models, err := api.ListAIModels(profile.BackendURL, profile.AccessToken, profile.Client, profile.UID)
+	models, err := fetchVisibleActionModels(profile)
 	if err != nil {
 		return nil, err
 	}
@@ -566,6 +567,78 @@ func fetchKnownActionTags(profile profileConfig) (map[string]bool, error) {
 	}
 
 	return knownTags, nil
+}
+
+func fetchVisibleActionModels(profile profileConfig) ([]api.AIModelRef, error) {
+	models, err := api.ListAIModels(profile.BackendURL, profile.AccessToken, profile.Client, profile.UID)
+	if err != nil {
+		return nil, err
+	}
+
+	visibleModels := make([]api.AIModelRef, 0, len(models))
+	for _, model := range models {
+		if shouldHideActionModel(model) {
+			continue
+		}
+		visibleModels = append(visibleModels, model)
+	}
+
+	return visibleModels, nil
+}
+
+func shouldHideActionModel(model api.AIModelRef) bool {
+	if strings.EqualFold(strings.TrimSpace(model.Provider), "openclaw") {
+		return true
+	}
+
+	tagName := strings.ToLower(strings.TrimSpace(model.ActionTagName))
+	return strings.HasPrefix(tagName, "openclaw")
+}
+
+func completeActionArgs(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	if len(args) > 0 {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+
+	profile, err := requireAuthenticatedProfile()
+	if err != nil {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+
+	models, err := fetchVisibleActionModels(profile)
+	if err != nil {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+
+	normalizedPrefix := strings.ToLower(strings.TrimSpace(strings.TrimPrefix(toComplete, "!")))
+	wantBangPrefix := strings.HasPrefix(strings.TrimSpace(toComplete), "!")
+	completions := []string{}
+	seenTags := map[string]bool{}
+
+	for _, model := range models {
+		tagName := strings.TrimSpace(model.ActionTagName)
+		if tagName == "" {
+			continue
+		}
+
+		normalizedTag := strings.ToLower(tagName)
+		if normalizedPrefix != "" && !strings.HasPrefix(normalizedTag, normalizedPrefix) {
+			continue
+		}
+		if seenTags[normalizedTag] {
+			continue
+		}
+		seenTags[normalizedTag] = true
+
+		completionTag := tagName
+		if wantBangPrefix {
+			completionTag = "!" + tagName
+		}
+		completions = append(completions, completionTag)
+	}
+
+	sort.Strings(completions)
+	return completions, cobra.ShellCompDirectiveNoFileComp
 }
 
 func createAndPollAction(
