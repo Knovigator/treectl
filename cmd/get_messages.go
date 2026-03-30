@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"encoding/json"
 	"fmt"
 
 	"github.com/Knovigator/knovigator/treectl/api"
@@ -40,25 +39,15 @@ func runGetMessages(cmd *cobra.Command, args []string) {
 
 	switch outputFormat {
 	case "json":
-		// pretty print the messages info
-		prettyJSON, err := json.MarshalIndent(messagesInfo, "", "  ")
+		prettyJSON, err := api.PrettyJSON(messagesInfo.Raw)
 		if err != nil {
 			fmt.Printf("Error formatting JSON: %v\n", err)
 			return
 		}
-		fmt.Println(string(prettyJSON))
+		fmt.Println(prettyJSON)
 	case "ascii":
-		if answers, ok := messagesInfo["answers"].([]interface{}); ok {
-			for _, answer := range answers {
-				if answerMap, ok := answer.(map[string]interface{}); ok {
-					message := api.Message{
-						ID:      answerMap["id"].(string),
-						Content: answerMap["content"].(string),
-						Extra:   answerMap,
-					}
-					fmt.Println(message.ToASCII())
-				}
-			}
+		for _, answer := range messagesInfo.Answers {
+			fmt.Println(answer.ToASCII())
 		}
 	default:
 		fmt.Printf("Invalid output format: %s. Use 'ascii' or 'json'.\n", outputFormat)

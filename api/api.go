@@ -5,55 +5,49 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"net/url"
+	"time"
 
 	"github.com/go-resty/resty/v2"
 )
 
 // GetMessages fetches messages from the API and returns them
-func GetMessages(backendURL, accessToken, client, uid string, messageIDs []string) (map[string]interface{}, error) {
-	// create a new resty client
+func GetMessages(backendURL, accessToken, client, uid string, messageIDs []string) (MessagesResponse, error) {
 	restyClient := resty.New()
+	restyClient.SetTimeout(10 * time.Second)
 
-	// prepare query parameters
-	queryParams := url.Values{}
-	for _, id := range messageIDs {
-		queryParams.Add("ids[]", id)
-	}
+	requestBody := map[string][]string{"ids": messageIDs}
 
-	// make the request
 	resp, err := restyClient.R().
-		SetQueryParamsFromValues(queryParams).
 		SetHeader("accept", "application/json").
 		SetHeader("Content-Type", "application/json").
 		SetHeader("access-token", accessToken).
 		SetHeader("client", client).
 		SetHeader("uid", uid).
-		Get(fmt.Sprintf("%s/api/v1/answers/bulk", backendURL))
+		SetBody(requestBody).
+		Post(fmt.Sprintf("%s/api/v1/answers/bulk", backendURL))
 
 	if err != nil {
-		return nil, fmt.Errorf("error making request: %v", err)
+		return MessagesResponse{}, fmt.Errorf("error making request: %v", err)
 	}
 
 	if resp.StatusCode() != http.StatusOK {
-		return nil, fmt.Errorf("error: received status code %d. Response body: %s", resp.StatusCode(), resp.Body())
+		return MessagesResponse{}, fmt.Errorf("error: received status code %d. Response body: %s", resp.StatusCode(), resp.Body())
 	}
 
-	// parse the response
-	var messagesInfo map[string]interface{}
+	var messagesInfo MessagesResponse
 	err = json.Unmarshal(resp.Body(), &messagesInfo)
 	if err != nil {
-		return nil, fmt.Errorf("error parsing response: %v", err)
+		return MessagesResponse{}, fmt.Errorf("error parsing response: %v", err)
 	}
+	messagesInfo.Raw = append(messagesInfo.Raw[:0], resp.Body()...)
 
 	return messagesInfo, nil
 }
 
-func GetThread(backendURL, threadID, accessToken, client, uid string) (map[string]interface{}, error) {
-	// create a new resty client
+func GetThread(backendURL, threadID, accessToken, client, uid string) (ThreadResponse, error) {
 	restyClient := resty.New()
+	restyClient.SetTimeout(10 * time.Second)
 
-	// make the request
 	resp, err := restyClient.R().
 		SetHeader("accept", "application/json").
 		SetHeader("access-token", accessToken).
@@ -62,19 +56,19 @@ func GetThread(backendURL, threadID, accessToken, client, uid string) (map[strin
 		Get(fmt.Sprintf("%s/api/v1/quests/%s", backendURL, threadID))
 
 	if err != nil {
-		return nil, fmt.Errorf("error making request: %v", err)
+		return ThreadResponse{}, fmt.Errorf("error making request: %v", err)
 	}
 
 	if resp.StatusCode() != http.StatusOK {
-		return nil, fmt.Errorf("received status code %d: %s", resp.StatusCode(), resp.Body())
+		return ThreadResponse{}, fmt.Errorf("received status code %d: %s", resp.StatusCode(), resp.Body())
 	}
 
-	// parse the response
-	var threadInfo map[string]interface{}
+	var threadInfo ThreadResponse
 	err = json.Unmarshal(resp.Body(), &threadInfo)
 	if err != nil {
-		return nil, fmt.Errorf("error parsing response: %v", err)
+		return ThreadResponse{}, fmt.Errorf("error parsing response: %v", err)
 	}
+	threadInfo.Raw = append(threadInfo.Raw[:0], resp.Body()...)
 
 	return threadInfo, nil
 }

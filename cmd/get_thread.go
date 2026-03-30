@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 
@@ -23,7 +22,7 @@ var noRehydrate bool
 // var outputFormat string
 
 func init() {
-	getThreadCmd.Flags().BoolVarP(&noRehydrate, "no-rehydrate", "n", false, "Do not rehydrate answers into the thread")
+	getThreadCmd.Flags().BoolVarP(&noRehydrate, "no-rehydrate", "n", false, "Deprecated: quest responses already include hydrated parent and sorted_answers")
 	getThreadCmd.Flags().StringVarP(&outputFormat, "output", "o", "ascii", "Output format: ascii or json")
 }
 
@@ -42,95 +41,17 @@ func runGetThread(cmd *cobra.Command, args []string) {
 		return
 	}
 
-	if !noRehydrate {
-		threadInfo, err = hydrateAnswersIntoQuest(threadInfo, profile.BackendURL, profile.AccessToken, profile.Client, profile.UID)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error hydrating answers: %v\n", err)
-			return
-		}
-	}
-
 	switch outputFormat {
 	case "json":
-		// pretty print the thread info
-		prettyJSON, err := json.MarshalIndent(threadInfo, "", "  ")
+		prettyJSON, err := api.PrettyJSON(threadInfo.Raw)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error formatting JSON: %v\n", err)
 			return
 		}
-		fmt.Println(string(prettyJSON))
+		fmt.Println(prettyJSON)
 	case "ascii":
-		thread := api.Thread{Quest: threadInfo["quest"].(map[string]interface{})}
-		fmt.Println(thread.ToASCII())
+		fmt.Println(threadInfo.Quest.ToASCII())
 	default:
 		fmt.Printf("Invalid output format: %s. Use 'ascii' or 'json'.\n", outputFormat)
 	}
-}
-
-func hydrateAnswersIntoQuest(quest map[string]interface{}, backendURL, accessToken, client, uid string) (map[string]interface{}, error) {
-	if quest == nil {
-		return nil, nil
-	}
-
-	questData, ok := quest["quest"].(map[string]interface{})
-	if !ok {
-		return quest, nil
-	}
-
-	var allAnswerIds []string
-
-	if sortedAnswerIds, ok := questData["sorted_answer_ids"].([]interface{}); ok {
-		for _, id := range sortedAnswerIds {
-			if strID, ok := id.(string); ok {
-				allAnswerIds = append(allAnswerIds, strID)
-			}
-		}
-	}
-
-	if parentID, ok := questData["parent_id"].(string); ok && parentID != "" {
-		allAnswerIds = append(allAnswerIds, parentID)
-	}
-
-	if len(allAnswerIds) == 0 {
-		return quest, nil
-	}
-
-	messagesInfo, err := api.GetMessages(backendURL, accessToken, client, uid, allAnswerIds)
-	if err != nil {
-		return nil, fmt.Errorf("error fetching answers: %v", err)
-	}
-
-	answers, ok := messagesInfo["answers"].([]interface{})
-	if !ok {
-		return nil, fmt.Errorf("unexpected format for answers in response")
-	}
-
-	answerMap := make(map[string]interface{})
-	for _, answer := range answers {
-		if answerObj, ok := answer.(map[string]interface{}); ok {
-			if id, ok := answerObj["id"].(string); ok {
-				answerMap[id] = answerObj
-			}
-		}
-	}
-
-	if sortedAnswerIds, ok := questData["sorted_answer_ids"].([]interface{}); ok {
-		var sortedAnswers []interface{}
-		for _, id := range sortedAnswerIds {
-			if strID, ok := id.(string); ok {
-				if answer, found := answerMap[strID]; found {
-					sortedAnswers = append(sortedAnswers, answer)
-				}
-			}
-		}
-		questData["sorted_answers"] = sortedAnswers
-	}
-
-	if parentID, ok := questData["parent_id"].(string); ok && parentID != "" {
-		if parent, found := answerMap[parentID]; found {
-			questData["parent"] = parent
-		}
-	}
-
-	return quest, nil
 }
