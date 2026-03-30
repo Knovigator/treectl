@@ -28,6 +28,7 @@ var AppHostOverride string
 var loginEmail string
 var loginPassword string
 var readPasswordFromStdin bool
+var profileShowJSON bool
 
 var loginEndpointCandidates = []string{"/auth/sign_in", "/auth/signin"}
 var builtInProfileOrder = []string{"dev", "staging", "prod"}
@@ -101,6 +102,7 @@ func init() {
 	ProfileCmd.AddCommand(profileListCmd)
 	ProfileCmd.AddCommand(profileUseCmd)
 	ProfileCmd.AddCommand(profileShowCmd)
+	profileShowCmd.Flags().BoolVar(&profileShowJSON, "json", false, "Output JSON instead of human-readable text")
 }
 
 func runLogin(cmd *cobra.Command, args []string) {
@@ -210,13 +212,46 @@ func runProfileShow(cmd *cobra.Command, args []string) {
 		redactedProfile.AccessToken = redactValue(redactedProfile.AccessToken)
 	}
 
-	prettyJSON, err := json.MarshalIndent(redactedProfile, "", "  ")
-	if err != nil {
-		fmt.Println("Error formatting profile:", err)
+	if profileShowJSON {
+		prettyJSON, err := json.MarshalIndent(redactedProfile, "", "  ")
+		if err != nil {
+			fmt.Println("Error formatting profile:", err)
+			return
+		}
+
+		fmt.Println(string(prettyJSON))
 		return
 	}
 
-	fmt.Println(string(prettyJSON))
+	loginState := "signed-out"
+	if redactedProfile.AccessToken != "" && redactedProfile.Client != "" && redactedProfile.UID != "" {
+		loginState = "signed-in"
+	}
+
+	fmt.Printf("Profile: %s\n", redactedProfile.Name)
+	fmt.Printf("Backend: %s\n", redactedProfile.BackendURL)
+	if redactedProfile.AppHost != "" {
+		fmt.Printf("App host: %s\n", redactedProfile.AppHost)
+	}
+	fmt.Printf("Login: %s\n", loginState)
+	if redactedProfile.UID != "" {
+		fmt.Printf("UID: %s\n", redactedProfile.UID)
+	}
+	if redactedProfile.CurrentUserID != "" {
+		fmt.Printf("Current user id: %s\n", redactedProfile.CurrentUserID)
+	}
+	if redactedProfile.ActiveSpaceID != "" {
+		fmt.Printf("Active space id: %s\n", redactedProfile.ActiveSpaceID)
+	}
+	if redactedProfile.AccessToken != "" {
+		fmt.Printf("Access token: %s\n", redactedProfile.AccessToken)
+	}
+	if redactedProfile.Client != "" {
+		fmt.Printf("Client: %s\n", redactedProfile.Client)
+	}
+	if redactedProfile.Expiry != "" {
+		fmt.Printf("Expiry: %s\n", redactedProfile.Expiry)
+	}
 }
 
 func builtInProfiles() map[string]profileConfig {

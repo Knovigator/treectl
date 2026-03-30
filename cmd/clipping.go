@@ -20,7 +20,7 @@ type streamTarget struct {
 	Name string
 }
 
-func clipLink(url, content, attachment string, target streamTarget) {
+func clipLink(url, content, attachment string, target streamTarget, outputFormat string) {
 	profile, err := requireAuthenticatedProfile()
 	if err != nil {
 		fmt.Println("Error:", err)
@@ -33,7 +33,7 @@ func clipLink(url, content, attachment string, target streamTarget) {
 		return
 	}
 
-	printCreateQuestResult(profile, result, "ascii")
+	printCreateQuestResult(profile, result, outputFormat)
 }
 
 func resolveSpaceID(profile profileConfig, explicitSpaceID string) (string, error) {
@@ -396,4 +396,17 @@ func getMimeType(filePath string) string {
 		mimeType = "application/octet-stream"
 	}
 	return mimeType
+}
+
+func resolveOutputFormat(outputFormat string, jsonRequested bool) string {
+	if jsonRequested {
+		return "json"
+	}
+
+	trimmedOutputFormat := strings.TrimSpace(outputFormat)
+	if trimmedOutputFormat == "" {
+		return "ascii"
+	}
+
+	return trimmedOutputFormat
 }

@@ -24,6 +24,7 @@ var noRehydrate bool
 func init() {
 	getThreadCmd.Flags().BoolVarP(&noRehydrate, "no-rehydrate", "n", false, "Deprecated: quest responses already include hydrated parent and sorted_answers")
 	getThreadCmd.Flags().StringVarP(&outputFormat, "output", "o", "ascii", "Output format: ascii or json")
+	getThreadCmd.Flags().BoolVar(&getJSONOutput, "json", false, "Output JSON instead of human-readable text")
 }
 
 func runGetThread(cmd *cobra.Command, args []string) {
@@ -41,7 +42,7 @@ func runGetThread(cmd *cobra.Command, args []string) {
 		return
 	}
 
-	switch outputFormat {
+	switch resolveOutputFormat(outputFormat, getJSONOutput) {
 	case "json":
 		prettyJSON, err := api.PrettyJSON(threadInfo.Raw)
 		if err != nil {

@@ -65,6 +65,7 @@ var postTeamID string
 var postPublic bool
 var postPrivate bool
 var createOutputFormat string
+var createJSONOutput bool
 var actionAttachment string
 var actionStream string
 var actionReplyTo string
@@ -76,6 +77,7 @@ var actionPublic bool
 var actionPrivate bool
 var actionAllowUnknownTag bool
 var actionOutputFormat string
+var actionJSONOutput bool
 var actionPollInterval time.Duration
 var actionTimeout time.Duration
 var actionNoWait bool
@@ -83,6 +85,7 @@ var actionStatusAnswerID string
 var actionStatusThreadID string
 var actionStatusWatch bool
 var actionStatusOutputFormat string
+var actionStatusJSONOutput bool
 var actionStatusPollInterval time.Duration
 var actionStatusTimeout time.Duration
 
@@ -137,6 +140,7 @@ func init() {
 	newPostCmd.Flags().BoolVar(&postPublic, "public", false, "Mark the new thread as public")
 	newPostCmd.Flags().BoolVar(&postPrivate, "private", false, "Mark the new thread as private")
 	newPostCmd.Flags().StringVarP(&createOutputFormat, "output", "o", "ascii", "Output format: ascii or json")
+	newPostCmd.Flags().BoolVar(&createJSONOutput, "json", false, "Output JSON instead of human-readable text")
 	_ = newPostCmd.Flags().MarkHidden("thread")
 
 	ActionCmd.Flags().StringVarP(&actionAttachment, "attachment", "f", "", "Path to the file to attach")
@@ -150,7 +154,8 @@ func init() {
 	ActionCmd.Flags().BoolVar(&actionPublic, "public", false, "Mark the new thread as public")
 	ActionCmd.Flags().BoolVar(&actionPrivate, "private", false, "Mark the new thread as private")
 	ActionCmd.Flags().BoolVar(&actionAllowUnknownTag, "allow-unknown-tag", false, "Submit the action even if the tag is not present in the current model-backed tag list")
-	ActionCmd.Flags().StringVarP(&actionOutputFormat, "output", "o", "json", "Output format: ascii or json")
+	ActionCmd.Flags().StringVarP(&actionOutputFormat, "output", "o", "ascii", "Output format: ascii or json")
+	ActionCmd.Flags().BoolVar(&actionJSONOutput, "json", false, "Output JSON instead of human-readable text")
 	ActionCmd.Flags().DurationVar(&actionPollInterval, "poll-interval", 3*time.Second, "Polling interval while waiting for generated media")
 	ActionCmd.Flags().DurationVar(&actionTimeout, "timeout", 10*time.Minute, "Maximum time to wait for generated media")
 	ActionCmd.Flags().BoolVar(&actionNoWait, "no-wait", false, "Submit the action and return immediately without polling")
@@ -158,7 +163,8 @@ func init() {
 	actionStatusCmd.Flags().StringVar(&actionStatusAnswerID, "answer", "", "Check the action result for this answer id")
 	actionStatusCmd.Flags().StringVar(&actionStatusThreadID, "thread", "", "Check the action result for this thread/quest id")
 	actionStatusCmd.Flags().BoolVar(&actionStatusWatch, "watch", false, "Keep polling until the action completes, fails, or times out")
-	actionStatusCmd.Flags().StringVarP(&actionStatusOutputFormat, "output", "o", "json", "Output format: ascii or json")
+	actionStatusCmd.Flags().StringVarP(&actionStatusOutputFormat, "output", "o", "ascii", "Output format: ascii or json")
+	actionStatusCmd.Flags().BoolVar(&actionStatusJSONOutput, "json", false, "Output JSON instead of human-readable text")
 	actionStatusCmd.Flags().DurationVar(&actionStatusPollInterval, "poll-interval", 3*time.Second, "Polling interval while waiting in watch mode")
 	actionStatusCmd.Flags().DurationVar(&actionStatusTimeout, "timeout", 10*time.Minute, "Maximum time to wait in watch mode")
 	ActionCmd.AddCommand(actionTagsCmd)
@@ -171,6 +177,8 @@ func runNewPost(cmd *cobra.Command, args []string) {
 		fmt.Println("Error: Content is required for a post.")
 		return
 	}
+
+	resolvedOutputFormat := resolveOutputFormat(createOutputFormat, createJSONOutput)
 
 	profile, err := requireAuthenticatedProfile()
 	if err != nil {
@@ -200,7 +208,7 @@ func runNewPost(cmd *cobra.Command, args []string) {
 			return
 		}
 
-		printCreateAnswerResult(profile, result, createOutputFormat)
+		printCreateAnswerResult(profile, result, resolvedOutputFormat)
 		return
 	}
 
@@ -234,7 +242,7 @@ func runNewPost(cmd *cobra.Command, args []string) {
 		return
 	}
 
-	printCreateQuestResult(profile, result, createOutputFormat)
+	printCreateQuestResult(profile, result, resolvedOutputFormat)
 }
 
 func runAction(cmd *cobra.Command, args []string) {
@@ -252,6 +260,7 @@ func runAction(cmd *cobra.Command, args []string) {
 		fmt.Println("Error: --timeout must be greater than zero.")
 		return
 	}
+	resolvedOutputFormat := resolveOutputFormat(actionOutputFormat, actionJSONOutput)
 
 	profile, err := requireAuthenticatedProfile()
 	if err != nil {
@@ -293,7 +302,7 @@ func runAction(cmd *cobra.Command, args []string) {
 		return
 	}
 
-	printActionResult(actionResult, actionOutputFormat)
+	printActionResult(actionResult, resolvedOutputFormat)
 }
 
 func runActionStatus(cmd *cobra.Command, args []string) {
@@ -313,6 +322,7 @@ func runActionStatus(cmd *cobra.Command, args []string) {
 		fmt.Println("Error: --timeout must be greater than zero.")
 		return
 	}
+	resolvedOutputFormat := resolveOutputFormat(actionStatusOutputFormat, actionStatusJSONOutput)
 
 	profile, err := requireAuthenticatedProfile()
 	if err != nil {
@@ -331,7 +341,7 @@ func runActionStatus(cmd *cobra.Command, args []string) {
 			profile,
 			result.ThreadID,
 			result.AnswerID,
-			actionStatusOutputFormat,
+			resolvedOutputFormat,
 			actionStatusTimeout,
 			actionStatusPollInterval,
 		)
@@ -341,7 +351,7 @@ func runActionStatus(cmd *cobra.Command, args []string) {
 		}
 	}
 
-	printActionResult(result, actionStatusOutputFormat)
+	printActionResult(result, resolvedOutputFormat)
 }
 
 func createRootThread(profile profileConfig, options rootThreadCreateOptions) (api.CreateQuestResponse, error) {

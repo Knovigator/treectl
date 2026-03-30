@@ -17,9 +17,11 @@ var getMessagesCmd = &cobra.Command{
 }
 
 var outputFormat string
+var getJSONOutput bool
 
 func init() {
 	getMessagesCmd.Flags().StringVarP(&outputFormat, "output", "o", "ascii", "Output format: ascii or json")
+	getMessagesCmd.Flags().BoolVar(&getJSONOutput, "json", false, "Output JSON instead of human-readable text")
 }
 
 func runGetMessages(cmd *cobra.Command, args []string) {
@@ -37,7 +39,7 @@ func runGetMessages(cmd *cobra.Command, args []string) {
 		return
 	}
 
-	switch outputFormat {
+	switch resolveOutputFormat(outputFormat, getJSONOutput) {
 	case "json":
 		prettyJSON, err := api.PrettyJSON(messagesInfo.Raw)
 		if err != nil {

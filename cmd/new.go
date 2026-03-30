@@ -48,6 +48,7 @@ func init() {
 	newReplyCmd.Flags().StringVar(&replySpaceID, "space-id", "", "Space ID to create the reply in")
 	newReplyCmd.Flags().StringVar(&replyMessageType, "message-type", "", "Optional message_type for the reply")
 	newReplyCmd.Flags().StringVarP(&createOutputFormat, "output", "o", "ascii", "Output format: ascii or json")
+	newReplyCmd.Flags().BoolVar(&createJSONOutput, "json", false, "Output JSON instead of human-readable text")
 	_ = newReplyCmd.MarkFlagRequired("reply-to")
 	_ = newReplyCmd.Flags().MarkHidden("thread")
 }
@@ -58,6 +59,8 @@ func runNewReply(cmd *cobra.Command, args []string) {
 		fmt.Println("Error: Content is required for a reply.")
 		return
 	}
+
+	resolvedOutputFormat := resolveOutputFormat(createOutputFormat, createJSONOutput)
 
 	profile, err := requireAuthenticatedProfile()
 	if err != nil {
@@ -80,7 +83,7 @@ func runNewReply(cmd *cobra.Command, args []string) {
 		return
 	}
 
-	printCreateAnswerResult(profile, result, createOutputFormat)
+	printCreateAnswerResult(profile, result, resolvedOutputFormat)
 }
 
 func createReply(profile profileConfig, options replyCreateOptions) (api.CreateAnswerResponse, error) {
