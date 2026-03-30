@@ -311,31 +311,70 @@ func normalizeReplyTarget(value string) (string, error) {
 		return "", fmt.Errorf("missing --reply-to value")
 	}
 
+	questID, ok := extractQuestIDFromTarget(trimmedValue)
+	if !ok {
+		return "", fmt.Errorf("--reply-to must be a quest UUID or quest link")
+	}
+
+	return questID, nil
+}
+
+func normalizeThreadTarget(value string) (string, error) {
+	trimmedValue := strings.TrimSpace(value)
+	if trimmedValue == "" {
+		return "", fmt.Errorf("missing quest target")
+	}
+
+	questID, ok := extractQuestIDFromTarget(trimmedValue)
+	if !ok {
+		return "", fmt.Errorf("thread target must be a quest UUID or quest link")
+	}
+
+	return questID, nil
+}
+
+func normalizeAnswerTarget(value string) (string, error) {
+	trimmedValue := strings.TrimSpace(value)
+	if trimmedValue == "" {
+		return "", fmt.Errorf("missing post target")
+	}
+
 	if looksLikeUUID(trimmedValue) {
 		return trimmedValue, nil
 	}
 
-	parsedURL, err := parseReplyTargetURL(trimmedValue)
+	parsedURL, err := parseTreechatTargetURL(trimmedValue)
 	if err != nil {
-		return "", fmt.Errorf("--reply-to must be a quest UUID or quest link")
+		return "", fmt.Errorf("post target must be a post UUID or post link")
 	}
 
-	pathSegments := strings.Split(strings.Trim(parsedURL.Path, "/"), "/")
-	for index := 0; index < len(pathSegments)-1; index++ {
-		if pathSegments[index] != "quest" {
-			continue
-		}
-
-		candidateID := strings.TrimSpace(pathSegments[index+1])
-		if looksLikeUUID(candidateID) {
-			return candidateID, nil
-		}
+	if _, ok := extractQuestIDFromParsedURL(parsedURL); ok {
+		return "", fmt.Errorf("post target must be a post UUID or post link; use the default quest target for thread links")
 	}
 
-	return "", fmt.Errorf("--reply-to must be a quest UUID or quest link")
+	answerID, ok := extractFirstUUIDFromParsedURL(parsedURL)
+	if !ok {
+		return "", fmt.Errorf("post target must be a post UUID or post link")
+	}
+
+	return answerID, nil
 }
 
-func parseReplyTargetURL(value string) (*neturl.URL, error) {
+func extractQuestIDFromTarget(value string) (string, bool) {
+	trimmedValue := strings.TrimSpace(value)
+	if looksLikeUUID(trimmedValue) {
+		return trimmedValue, true
+	}
+
+	parsedURL, err := parseTreechatTargetURL(trimmedValue)
+	if err != nil {
+		return "", false
+	}
+
+	return extractQuestIDFromParsedURL(parsedURL)
+}
+
+func parseTreechatTargetURL(value string) (*neturl.URL, error) {
 	candidateValue := strings.TrimSpace(value)
 	if strings.HasPrefix(candidateValue, "/") {
 		candidateValue = "https://placeholder.invalid" + candidateValue
@@ -344,6 +383,43 @@ func parseReplyTargetURL(value string) (*neturl.URL, error) {
 	}
 
 	return neturl.Parse(candidateValue)
+}
+
+func extractQuestIDFromParsedURL(parsedURL *neturl.URL) (string, bool) {
+	pathSegments := strings.Split(strings.Trim(parsedURL.Path, "/"), "/")
+	for index := 0; index < len(pathSegments)-1; index++ {
+		if pathSegments[index] != "quest" {
+			continue
+		}
+
+		candidateID := strings.TrimSpace(pathSegments[index+1])
+		if looksLikeUUID(candidateID) {
+			return candidateID, true
+		}
+	}
+
+	return "", false
+}
+
+func extractFirstUUIDFromParsedURL(parsedURL *neturl.URL) (string, bool) {
+	searchParts := []string{
+		parsedURL.Path,
+		parsedURL.Fragment,
+		parsedURL.RawQuery,
+	}
+
+	for _, searchPart := range searchParts {
+		candidateIDs := strings.FieldsFunc(searchPart, func(r rune) bool {
+			return !(unicode.IsLetter(r) || unicode.IsDigit(r) || r == '-')
+		})
+		for _, candidateID := range candidateIDs {
+			if looksLikeUUID(candidateID) {
+				return candidateID, true
+			}
+		}
+	}
+
+	return "", false
 }
 
 func createClipQuest(

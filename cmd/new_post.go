@@ -46,13 +46,14 @@ var actionTagsCmd = &cobra.Command{
 }
 
 var actionStatusCmd = &cobra.Command{
-	Use:   "status",
-	Short: "Check an existing action result by answer or thread id",
-	Long:  "Check an existing action answer by answer id or by the thread/quest id that owns it. Use --watch to keep polling until it completes, fails, or times out.",
-	Example: "  treectl action status --answer aeaacf68-d1a7-4f78-8fb0-a39c66ca1cc7\n" +
-		"  treectl action status --thread ec587036-f0f8-423a-8ffb-12658f7ac3ce\n" +
+	Use:   "status [quest-id-or-link]",
+	Short: "Check an existing action result at the thread or post level",
+	Long:  "Check an existing action result at the thread/quest level by default, or inspect a specific post with --post or --answer. Use --watch to keep polling until it completes, fails, or times out.",
+	Example: "  treectl action status ec587036-f0f8-423a-8ffb-12658f7ac3ce\n" +
+		"  treectl action status http://localhost:5173/quest/ec587036-f0f8-423a-8ffb-12658f7ac3ce\n" +
+		"  treectl action status --post aeaacf68-d1a7-4f78-8fb0-a39c66ca1cc7\n" +
 		"  treectl action status --answer aeaacf68-d1a7-4f78-8fb0-a39c66ca1cc7 --watch",
-	Args: cobra.NoArgs,
+	Args: cobra.MaximumNArgs(1),
 	Run:  runActionStatus,
 }
 
@@ -163,13 +164,15 @@ func init() {
 	ActionCmd.Flags().DurationVar(&actionTimeout, "timeout", 10*time.Minute, "Maximum time to wait for generated media")
 	ActionCmd.Flags().BoolVar(&actionNoWait, "no-wait", false, "Submit the action and return immediately without polling")
 	_ = ActionCmd.Flags().MarkHidden("thread")
-	actionStatusCmd.Flags().StringVar(&actionStatusAnswerID, "answer", "", "Check the action result for this answer id")
-	actionStatusCmd.Flags().StringVar(&actionStatusThreadID, "thread", "", "Check the action result for this thread/quest id")
+	actionStatusCmd.Flags().StringVar(&actionStatusAnswerID, "answer", "", "Check the action result for this post/answer id or link")
+	actionStatusCmd.Flags().StringVar(&actionStatusAnswerID, "post", "", "Check the action result for this post/answer id or link")
+	actionStatusCmd.Flags().StringVar(&actionStatusThreadID, "thread", "", "Compatibility alias for the default quest/thread target")
 	actionStatusCmd.Flags().BoolVar(&actionStatusWatch, "watch", false, "Keep polling until the action completes, fails, or times out")
 	actionStatusCmd.Flags().StringVarP(&actionStatusOutputFormat, "output", "o", "ascii", "Output format: ascii or json")
 	actionStatusCmd.Flags().BoolVar(&actionStatusJSONOutput, "json", false, "Output JSON instead of human-readable text")
 	actionStatusCmd.Flags().DurationVar(&actionStatusPollInterval, "poll-interval", 3*time.Second, "Polling interval while waiting in watch mode")
 	actionStatusCmd.Flags().DurationVar(&actionStatusTimeout, "timeout", 10*time.Minute, "Maximum time to wait in watch mode")
+	_ = actionStatusCmd.Flags().MarkHidden("thread")
 	ActionCmd.AddCommand(actionTagsCmd)
 	ActionCmd.AddCommand(actionStatusCmd)
 }
@@ -315,12 +318,20 @@ func runAction(cmd *cobra.Command, args []string) {
 }
 
 func runActionStatus(cmd *cobra.Command, args []string) {
-	if strings.TrimSpace(actionStatusAnswerID) == "" && strings.TrimSpace(actionStatusThreadID) == "" {
-		fmt.Println("Error: pass either --answer <answer-id> or --thread <quest-id>.")
+	threadTarget := ""
+	if len(args) > 0 {
+		threadTarget = args[0]
+	}
+	if strings.TrimSpace(threadTarget) == "" {
+		threadTarget = strings.TrimSpace(actionStatusThreadID)
+	}
+
+	if strings.TrimSpace(actionStatusAnswerID) == "" && strings.TrimSpace(threadTarget) == "" {
+		fmt.Println("Error: pass a quest id/link, or use --post/--answer <post-id-or-link>.")
 		return
 	}
-	if strings.TrimSpace(actionStatusAnswerID) != "" && strings.TrimSpace(actionStatusThreadID) != "" {
-		fmt.Println("Error: pass only one of --answer or --thread.")
+	if strings.TrimSpace(actionStatusAnswerID) != "" && strings.TrimSpace(threadTarget) != "" {
+		fmt.Println("Error: pass either a quest target or --post/--answer, but not both.")
 		return
 	}
 	if actionStatusPollInterval <= 0 {
@@ -339,7 +350,25 @@ func runActionStatus(cmd *cobra.Command, args []string) {
 		return
 	}
 
-	result, err := fetchActionStatus(profile, strings.TrimSpace(actionStatusThreadID), strings.TrimSpace(actionStatusAnswerID))
+	normalizedThreadTarget := ""
+	if strings.TrimSpace(threadTarget) != "" {
+		normalizedThreadTarget, err = normalizeThreadTarget(threadTarget)
+		if err != nil {
+			fmt.Println("Error:", err)
+			return
+		}
+	}
+
+	normalizedAnswerTarget := ""
+	if strings.TrimSpace(actionStatusAnswerID) != "" {
+		normalizedAnswerTarget, err = normalizeAnswerTarget(actionStatusAnswerID)
+		if err != nil {
+			fmt.Println("Error:", err)
+			return
+		}
+	}
+
+	result, err := fetchActionStatus(profile, normalizedThreadTarget, normalizedAnswerTarget)
 	if err != nil {
 		fmt.Println("Error:", err)
 		return
