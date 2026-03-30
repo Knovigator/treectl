@@ -105,10 +105,11 @@ type rootThreadCreateOptions struct {
 
 type actionResult struct {
 	Status        string   `json:"status"`
-	ThreadID      string   `json:"thread_id"`
-	AnswerID      string   `json:"answer_id"`
-	ThreadURL     string   `json:"thread_url"`
-	MediaURLs     []string `json:"media_urls"`
+	ThreadUUID    string   `json:"thread_uuid"`
+	PostUUID      string   `json:"post_uuid"`
+	ThreadLink    string   `json:"thread_link"`
+	MediaLinks    []string `json:"media_links"`
+	RawMediaLinks []string `json:"raw_media_links"`
 	FailureReason string   `json:"failure_reason,omitempty"`
 }
 
@@ -339,8 +340,8 @@ func runActionStatus(cmd *cobra.Command, args []string) {
 	if actionStatusWatch && result.Status == "pending" {
 		result, err = pollActionResult(
 			profile,
-			result.ThreadID,
-			result.AnswerID,
+			result.ThreadUUID,
+			result.PostUUID,
 			resolvedOutputFormat,
 			actionStatusTimeout,
 			actionStatusPollInterval,
@@ -507,14 +508,23 @@ func printActionResult(result actionResult, outputFormat string) {
 		fmt.Println(string(prettyJSON))
 	case "ascii":
 		fmt.Printf("Status: %s\n", result.Status)
-		fmt.Printf("Thread: %s\n", result.ThreadID)
-		fmt.Printf("Answer: %s\n", result.AnswerID)
-		fmt.Printf("Link: %s\n", result.ThreadURL)
+		fmt.Printf("Thread UUID: %s\n", result.ThreadUUID)
+		fmt.Printf("Post UUID: %s\n", result.PostUUID)
+		fmt.Printf("Thread link: %s\n", result.ThreadLink)
 		if result.FailureReason != "" {
 			fmt.Printf("Failure: %s\n", result.FailureReason)
 		}
-		for _, mediaURL := range result.MediaURLs {
-			fmt.Printf("Media: %s\n", mediaURL)
+		maxLinks := len(result.MediaLinks)
+		if len(result.RawMediaLinks) > maxLinks {
+			maxLinks = len(result.RawMediaLinks)
+		}
+		for index := 0; index < maxLinks; index++ {
+			if index < len(result.MediaLinks) {
+				fmt.Printf("Media link: %s\n", result.MediaLinks[index])
+			}
+			if index < len(result.RawMediaLinks) {
+				fmt.Printf("Raw media link: %s\n", result.RawMediaLinks[index])
+			}
 		}
 	default:
 		fmt.Printf("Invalid output format: %s. Use 'ascii' or 'json'.\n", outputFormat)
@@ -929,15 +939,41 @@ func actionResultFromAnswer(profile profileConfig, threadID string, answer api.A
 	if resolvedThreadID == "" {
 		resolvedThreadID = strings.TrimSpace(answer.QuestID)
 	}
+	mediaLinkPairs := api.ResolveAnswerMediaLinks(answer, profile.BackendURL)
 
 	return actionResult{
 		Status:        answer.GenerationStatus(),
-		ThreadID:      resolvedThreadID,
-		AnswerID:      answer.ID,
-		ThreadURL:     threadLink(profile, resolvedThreadID),
-		MediaURLs:     api.ResolveAnswerMediaURLs(answer, profile.BackendURL),
+		ThreadUUID:    resolvedThreadID,
+		PostUUID:      answer.ID,
+		ThreadLink:    threadLink(profile, resolvedThreadID),
+		MediaLinks:    mediaLinksFromResolvedPairs(mediaLinkPairs),
+		RawMediaLinks: rawMediaLinksFromResolvedPairs(mediaLinkPairs),
 		FailureReason: answer.GenerationFailureReason(),
 	}
+}
+
+func mediaLinksFromResolvedPairs(mediaLinkPairs []api.ResolvedMediaLink) []string {
+	mediaLinks := make([]string, 0, len(mediaLinkPairs))
+	for _, mediaLinkPair := range mediaLinkPairs {
+		if strings.TrimSpace(mediaLinkPair.MediaLink) == "" {
+			continue
+		}
+		mediaLinks = append(mediaLinks, mediaLinkPair.MediaLink)
+	}
+
+	return mediaLinks
+}
+
+func rawMediaLinksFromResolvedPairs(mediaLinkPairs []api.ResolvedMediaLink) []string {
+	rawMediaLinks := make([]string, 0, len(mediaLinkPairs))
+	for _, mediaLinkPair := range mediaLinkPairs {
+		if strings.TrimSpace(mediaLinkPair.RawMediaLink) == "" {
+			continue
+		}
+		rawMediaLinks = append(rawMediaLinks, mediaLinkPair.RawMediaLink)
+	}
+
+	return rawMediaLinks
 }
 
 func startActionSpinner(answerID string) *actionSpinner {

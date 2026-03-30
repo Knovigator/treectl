@@ -55,6 +55,11 @@ type CreateClipQuestRequest struct {
 	Destination map[string]interface{}
 }
 
+type ResolvedMediaLink struct {
+	MediaLink    string
+	RawMediaLink string
+}
+
 // GetMessages fetches messages from the API and returns them
 func GetMessages(backendURL, accessToken, client, uid string, messageIDs []string) (MessagesResponse, error) {
 	requestBody := map[string][]string{"ids": messageIDs}
@@ -475,22 +480,31 @@ func postMultipart(
 	return resp, nil
 }
 
-func ResolveAnswerMediaURLs(answer Answer, fallbackBase string) []string {
+func ResolveAnswerMediaLinks(answer Answer, fallbackBase string) []ResolvedMediaLink {
 	canonicalURLs := answer.CanonicalMediaURLs(fallbackBase)
-	resolvedURLs := make([]string, 0, len(canonicalURLs))
-	seenURLs := map[string]bool{}
+	resolvedLinks := make([]ResolvedMediaLink, 0, len(canonicalURLs))
+	seenPairs := map[string]bool{}
 
 	for _, mediaURL := range canonicalURLs {
-		resolvedURL := ResolveFinalURL(mediaURL, fallbackBase)
-		if strings.TrimSpace(resolvedURL) == "" || seenURLs[resolvedURL] {
+		canonicalURL := canonicalizeURL(mediaURL, fallbackBase)
+		if strings.TrimSpace(canonicalURL) == "" {
 			continue
 		}
 
-		seenURLs[resolvedURL] = true
-		resolvedURLs = append(resolvedURLs, resolvedURL)
+		resolvedURL := ResolveFinalURL(canonicalURL, fallbackBase)
+		pairKey := canonicalURL + "\n" + resolvedURL
+		if seenPairs[pairKey] {
+			continue
+		}
+
+		seenPairs[pairKey] = true
+		resolvedLinks = append(resolvedLinks, ResolvedMediaLink{
+			MediaLink:    canonicalURL,
+			RawMediaLink: resolvedURL,
+		})
 	}
 
-	return resolvedURLs
+	return resolvedLinks
 }
 
 func ResolveFinalURL(rawURL string, fallbackBase string) string {
