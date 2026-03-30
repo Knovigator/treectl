@@ -3,7 +3,6 @@ package main
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 
 	"github.com/Knovigator/knovigator/treectl/cmd"
 	"github.com/adrg/xdg"
@@ -19,9 +18,13 @@ var rootCmd = &cobra.Command{
 
 func init() {
 	cobra.OnInitialize(initConfig)
+	rootCmd.PersistentFlags().StringVar(&cmd.SelectedProfile, "profile", "", "Profile to use (dev, staging, prod, or custom)")
+	rootCmd.PersistentFlags().StringVar(&cmd.BackendURLOverride, "backend-url", "", "Override the backend API base URL for this invocation")
+	rootCmd.PersistentFlags().StringVar(&cmd.AppHostOverride, "app-host", "", "Override the app host for generated links for this invocation")
 	rootCmd.AddCommand(cmd.LoginCmd)
 	rootCmd.AddCommand(cmd.GetCmd)
 	rootCmd.AddCommand(cmd.NewCmd) // Add the new top-level command
+	rootCmd.AddCommand(cmd.ProfileCmd)
 }
 
 func initConfig() {
@@ -33,23 +36,14 @@ func initConfig() {
 
 	viper.SetConfigFile(configPath)
 	viper.SetConfigType("toml")
-
-	// create config file if it doesn't exist
-	if _, err := os.Stat(configPath); os.IsNotExist(err) {
-		err = os.MkdirAll(filepath.Dir(configPath), 0755)
-		if err != nil {
-			fmt.Println("Error creating config directory:", err)
-			return
-		}
-		_, err = os.Create(configPath)
-		if err != nil {
-			fmt.Println("Error creating config file:", err)
-			return
-		}
-	}
+	viper.SetEnvPrefix("TREECTL")
+	viper.AutomaticEnv()
 
 	if err := viper.ReadInConfig(); err != nil {
-		fmt.Println("Error reading config file:", err)
+		_, isConfigMissing := err.(viper.ConfigFileNotFoundError)
+		if !isConfigMissing && !os.IsNotExist(err) {
+			fmt.Println("Error reading config file:", err)
+		}
 	}
 }
 

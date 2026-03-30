@@ -8,18 +8,12 @@ import (
 	"strings"
 
 	"github.com/Knovigator/knovigator/treectl/api"
-	"github.com/spf13/viper"
 )
 
 func clipLink(url, content, attachment string, isClip bool) {
-	// load credentials from viper config
-	accessToken := viper.GetString("access_token")
-	client := viper.GetString("client")
-	uid := viper.GetString("uid")
-	backendURL := viper.GetString("backend_url")
-
-	if accessToken == "" || client == "" || uid == "" || backendURL == "" {
-		fmt.Println("Error: Missing credentials. Please login first.")
+	profile, err := requireAuthenticatedProfile()
+	if err != nil {
+		fmt.Println("Error:", err)
 		return
 	}
 
@@ -38,7 +32,6 @@ func clipLink(url, content, attachment string, isClip bool) {
 	}
 
 	var image, video, file []byte
-	var err error
 
 	if attachment != "" {
 		fileContent, err := os.ReadFile(attachment)
@@ -59,10 +52,10 @@ func clipLink(url, content, attachment string, isClip bool) {
 	}
 
 	result, err := api.ClipLink(
-		backendURL,
-		accessToken,
-		client,
-		uid,
+		profile.BackendURL,
+		profile.AccessToken,
+		profile.Client,
+		profile.UID,
 		url,
 		image,
 		video,
@@ -76,7 +69,12 @@ func clipLink(url, content, attachment string, isClip bool) {
 		fmt.Println("Error creating post:", err)
 		return
 	} else {
-		fmt.Printf("Post created successfully. See it at: http://home.treechat.ai/quest/%s\n", result["id"])
+		linkBase := profile.AppHost
+		if linkBase == "" {
+			linkBase = profile.BackendURL
+		}
+
+		fmt.Printf("Post created successfully. See it at: %s/quest/%s\n", strings.TrimRight(linkBase, "/"), result["id"])
 	}
 }
 

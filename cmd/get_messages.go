@@ -6,7 +6,6 @@ import (
 
 	"github.com/Knovigator/knovigator/treectl/api"
 	"github.com/spf13/cobra"
-	"github.com/spf13/viper"
 )
 
 var getMessagesCmd = &cobra.Command{
@@ -27,18 +26,13 @@ func init() {
 func runGetMessages(cmd *cobra.Command, args []string) {
 	messageIDs := args
 
-	// load credentials from viper config
-	accessToken := viper.GetString("access_token")
-	client := viper.GetString("client")
-	uid := viper.GetString("uid")
-	backendURL := viper.GetString("backend_url")
-
-	if accessToken == "" || client == "" || uid == "" || backendURL == "" {
-		fmt.Println("Error: Missing credentials. Please login first.")
+	profile, err := requireAuthenticatedProfile()
+	if err != nil {
+		fmt.Println("Error:", err)
 		return
 	}
 
-	messagesInfo, err := api.GetMessages(backendURL, accessToken, client, uid, messageIDs)
+	messagesInfo, err := api.GetMessages(profile.BackendURL, profile.AccessToken, profile.Client, profile.UID, messageIDs)
 	if err != nil {
 		fmt.Printf("Error: %v\n", err)
 		return

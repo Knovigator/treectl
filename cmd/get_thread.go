@@ -7,7 +7,6 @@ import (
 
 	"github.com/Knovigator/knovigator/treectl/api"
 	"github.com/spf13/cobra"
-	"github.com/spf13/viper"
 )
 
 var getThreadCmd = &cobra.Command{
@@ -31,25 +30,20 @@ func init() {
 func runGetThread(cmd *cobra.Command, args []string) {
 	threadID := args[0]
 
-	// load credentials from viper config
-	accessToken := viper.GetString("access_token")
-	client := viper.GetString("client")
-	uid := viper.GetString("uid")
-	backendURL := viper.GetString("backend_url")
-
-	if accessToken == "" || client == "" || uid == "" || backendURL == "" {
-		fmt.Fprintln(os.Stderr, "Error: Missing credentials. Please login first.")
+	profile, err := requireAuthenticatedProfile()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		return
 	}
 
-	threadInfo, err := api.GetThread(backendURL, threadID, accessToken, client, uid)
+	threadInfo, err := api.GetThread(profile.BackendURL, threadID, profile.AccessToken, profile.Client, profile.UID)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		return
 	}
 
 	if !noRehydrate {
-		threadInfo, err = hydrateAnswersIntoQuest(threadInfo, backendURL, accessToken, client, uid)
+		threadInfo, err = hydrateAnswersIntoQuest(threadInfo, profile.BackendURL, profile.AccessToken, profile.Client, profile.UID)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error hydrating answers: %v\n", err)
 			return
