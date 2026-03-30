@@ -76,6 +76,12 @@ func runNewReply(cmd *cobra.Command, args []string) {
 		return
 	}
 
+	deltaJSON, err := textToDeltaJSONString(content)
+	if err != nil {
+		fmt.Println("Error:", err)
+		return
+	}
+
 	result, err := api.CreateAnswer(
 		profile.BackendURL,
 		profile.AccessToken,
@@ -87,6 +93,7 @@ func runNewReply(cmd *cobra.Command, args []string) {
 			QuestID:      replyThreadID,
 			SpaceID:      spaceID,
 			Content:      content,
+			DeltaJSON:    deltaJSON,
 			MessageType:  replyMessageType,
 			Uploads:      uploads,
 		},

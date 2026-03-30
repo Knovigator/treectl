@@ -2,76 +2,38 @@ package cmd
 
 import (
 	"crypto/rand"
+	"encoding/json"
 	"fmt"
 	"mime"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
+	"unicode"
 
 	"github.com/Knovigator/knovigator/treectl/api"
 )
 
-func clipLink(url, content, attachment string, isClip bool) {
+type streamTarget struct {
+	Kind string
+	ID   string
+	Name string
+}
+
+func clipLink(url, content, attachment string, target streamTarget) {
 	profile, err := requireAuthenticatedProfile()
 	if err != nil {
 		fmt.Println("Error:", err)
 		return
 	}
 
-	// set the destination to a stream with id 'PSEUDOSTREAM__CLIPS' for clips, or 'PSEUDOSTREAM__POSTS' for posts
-	destinationName := "Clips"
-	destinationId := "PSEUDOSTREAM__CLIPS"
-	if !isClip {
-		destinationName = "Posts"
-		destinationId = "PSEUDOSTREAM__POSTS"
-	}
-
-	destination := map[string]interface{}{
-		"type": "stream",
-		"name": destinationName,
-		"id":   destinationId,
-	}
-
-	var image, video, file []byte
-
-	if attachment != "" {
-		fileContent, err := os.ReadFile(attachment)
-		if err != nil {
-			fmt.Printf("Error reading attachment file: %v\n", err)
-			return
-		}
-
-		mimeType := getMimeType(attachment)
-		switch {
-		case strings.HasPrefix(mimeType, "image/"):
-			image = fileContent
-		case strings.HasPrefix(mimeType, "video/"):
-			video = fileContent
-		default:
-			file = fileContent
-		}
-	}
-
-	result, err := api.ClipLink(
-		profile.BackendURL,
-		profile.AccessToken,
-		profile.Client,
-		profile.UID,
-		url,
-		image,
-		video,
-		file,
-		"",
-		content,
-		destination,
-	)
-
+	result, err := createClipQuest(profile, url, content, attachment, target)
 	if err != nil {
 		fmt.Println("Error creating post:", err)
 		return
-	} else {
-		fmt.Printf("Post created successfully. See it at: %s\n", threadLink(profile, fmt.Sprintf("%v", result["id"])))
 	}
+
+	printCreateQuestResult(profile, result, "ascii")
 }
 
 func resolveSpaceID(profile profileConfig, explicitSpaceID string) (string, error) {
@@ -85,6 +47,25 @@ func resolveSpaceID(profile profileConfig, explicitSpaceID string) (string, erro
 	}
 
 	return "", fmt.Errorf("missing space_id; pass --space-id or re-run treectl login for this profile")
+}
+
+func textToDeltaJSONString(content string) (string, error) {
+	if strings.TrimSpace(content) == "" {
+		return "", nil
+	}
+
+	deltaPayload := map[string][]map[string]string{
+		"ops": {
+			{"insert": content},
+		},
+	}
+
+	deltaJSON, err := json.Marshal(deltaPayload)
+	if err != nil {
+		return "", err
+	}
+
+	return string(deltaJSON), nil
 }
 
 func prepareAttachmentUploads(attachmentPath, imageField, recordingField, fileField string) ([]api.MultipartFile, error) {
@@ -115,6 +96,27 @@ func prepareAttachmentUploads(attachmentPath, imageField, recordingField, fileFi
 	}, nil
 }
 
+func prepareClipAttachmentData(attachmentPath string) ([]byte, []byte, []byte, error) {
+	if strings.TrimSpace(attachmentPath) == "" {
+		return nil, nil, nil, nil
+	}
+
+	fileContent, err := os.ReadFile(attachmentPath)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("error reading attachment file: %w", err)
+	}
+
+	mimeType := getMimeType(attachmentPath)
+	switch {
+	case strings.HasPrefix(mimeType, "image/"):
+		return fileContent, nil, nil, nil
+	case strings.HasPrefix(mimeType, "video/"):
+		return nil, fileContent, nil, nil
+	default:
+		return nil, nil, fileContent, nil
+	}
+}
+
 func newUUID() (string, error) {
 	randomBytes := make([]byte, 16)
 	_, err := rand.Read(randomBytes)
@@ -142,6 +144,153 @@ func threadLink(profile profileConfig, threadID string) string {
 	}
 
 	return fmt.Sprintf("%s/quest/%s", linkBase, threadID)
+}
+
+func defaultPrivateStreamTarget() streamTarget {
+	return streamTarget{
+		Kind: "private",
+		ID:   "PSEUDOSTREAM__PRIVATE",
+		Name: "Private",
+	}
+}
+
+func resolveStreamTarget(profile profileConfig, streamValue string, defaultTarget streamTarget) (streamTarget, error) {
+	if strings.TrimSpace(streamValue) == "" {
+		return defaultTarget, nil
+	}
+
+	normalizedStreamValue := normalizeStreamKey(streamValue)
+	if pseudoTarget, ok := resolvePseudoStreamTarget(normalizedStreamValue); ok {
+		return pseudoTarget, nil
+	}
+
+	spaceID, err := resolveSpaceID(profile, "")
+	if err != nil {
+		return streamTarget{}, err
+	}
+
+	userTeams, err := api.ListTeams(profile.BackendURL, profile.AccessToken, profile.Client, profile.UID, spaceID, false)
+	if err != nil {
+		return streamTarget{}, err
+	}
+
+	orderedTeams := appendUniqueTeams(nil, userTeams.Teams)
+
+	publicTeams, err := api.ListPublicTeams(profile.BackendURL, profile.AccessToken, profile.Client, profile.UID, spaceID)
+	if err == nil {
+		orderedTeams = appendUniqueTeams(orderedTeams, publicTeams.Teams)
+	}
+
+	for _, team := range orderedTeams {
+		if strings.EqualFold(team.ID, strings.TrimSpace(streamValue)) {
+			return streamTarget{Kind: "team", ID: team.ID, Name: team.Name}, nil
+		}
+
+		if normalizeStreamKey(team.Name) == normalizedStreamValue {
+			return streamTarget{Kind: "team", ID: team.ID, Name: team.Name}, nil
+		}
+
+		if normalizeStreamKey(team.ShortName) == normalizedStreamValue {
+			return streamTarget{Kind: "team", ID: team.ID, Name: team.Name}, nil
+		}
+	}
+
+	if looksLikeUUID(streamValue) {
+		trimmedValue := strings.TrimSpace(streamValue)
+		return streamTarget{Kind: "team", ID: trimmedValue, Name: trimmedValue}, nil
+	}
+
+	return streamTarget{}, fmt.Errorf("could not resolve stream %q", streamValue)
+}
+
+func appendUniqueTeams(existing []api.TeamRef, additional []api.TeamRef) []api.TeamRef {
+	seenTeamIDs := map[string]bool{}
+	for _, team := range existing {
+		if strings.TrimSpace(team.ID) == "" {
+			continue
+		}
+		seenTeamIDs[team.ID] = true
+	}
+
+	for _, team := range additional {
+		if strings.TrimSpace(team.ID) == "" || seenTeamIDs[team.ID] {
+			continue
+		}
+		existing = append(existing, team)
+		seenTeamIDs[team.ID] = true
+	}
+
+	return existing
+}
+
+func resolvePseudoStreamTarget(normalizedStreamValue string) (streamTarget, bool) {
+	switch normalizedStreamValue {
+	case "private", "pseudostreamprivate":
+		return streamTarget{Kind: "private", ID: "PSEUDOSTREAM__PRIVATE", Name: "Private"}, true
+	case "public", "home", "homepublic", "pseudostreampublic":
+		return streamTarget{Kind: "public", ID: "PSEUDOSTREAM__PUBLIC", Name: "Home (Public)"}, true
+	case "clips", "clip", "pseudostreamclips":
+		return streamTarget{Kind: "clips", ID: "PSEUDOSTREAM__CLIPS", Name: "Clips"}, true
+	default:
+		return streamTarget{}, false
+	}
+}
+
+func normalizeStreamKey(value string) string {
+	trimmedValue := strings.TrimSpace(strings.ToLower(value))
+	return strings.Map(func(r rune) rune {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			return r
+		}
+		return -1
+	}, trimmedValue)
+}
+
+func looksLikeUUID(value string) bool {
+	uuidPattern := regexp.MustCompile(`(?i)^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`)
+	return uuidPattern.MatchString(strings.TrimSpace(value))
+}
+
+func createClipQuest(
+	profile profileConfig,
+	url string,
+	content string,
+	attachment string,
+	target streamTarget,
+) (api.CreateQuestResponse, error) {
+	image, video, file, err := prepareClipAttachmentData(attachment)
+	if err != nil {
+		return api.CreateQuestResponse{}, err
+	}
+
+	deltaJSON, err := textToDeltaJSONString(content)
+	if err != nil {
+		return api.CreateQuestResponse{}, err
+	}
+
+	return api.CreateClipQuest(
+		profile.BackendURL,
+		profile.AccessToken,
+		profile.Client,
+		profile.UID,
+		api.CreateClipQuestRequest{
+			URL:         url,
+			Content:     content,
+			DeltaJSON:   deltaJSON,
+			Image:       image,
+			Video:       video,
+			File:        file,
+			Destination: clipDestinationFromTarget(target),
+		},
+	)
+}
+
+func clipDestinationFromTarget(target streamTarget) map[string]interface{} {
+	return map[string]interface{}{
+		"type": "stream",
+		"id":   target.ID,
+		"name": target.Name,
+	}
 }
 
 func printCreateQuestResult(profile profileConfig, result api.CreateQuestResponse, outputFormat string) {

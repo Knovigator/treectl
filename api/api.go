@@ -22,6 +22,7 @@ type CreateQuestRequest struct {
 	ParentAnswerID string
 	SpaceID        string
 	Content        string
+	DeltaJSON      string
 	MessageType    string
 	ThreadType     string
 	TeamID         string
@@ -36,8 +37,20 @@ type CreateAnswerRequest struct {
 	QuestID      string
 	SpaceID      string
 	Content      string
+	DeltaJSON    string
 	MessageType  string
 	Uploads      []MultipartFile
+}
+
+type CreateClipQuestRequest struct {
+	URL         string
+	Content     string
+	DeltaJSON   string
+	Image       []byte
+	Video       []byte
+	File        []byte
+	Title       string
+	Destination map[string]interface{}
 }
 
 // GetMessages fetches messages from the API and returns them
@@ -114,6 +127,72 @@ func GetAnswer(backendURL, answerID, accessToken, client, uid string) (AnswerRes
 	return answerInfo, nil
 }
 
+func ListTeams(
+	backendURL string,
+	accessToken string,
+	client string,
+	uid string,
+	spaceID string,
+	publicOnly bool,
+) (TeamsResponse, error) {
+	request := newRequest(accessToken, client, uid).
+		SetHeader("accept", "application/json").
+		SetQueryParam("space_id", spaceID)
+
+	if publicOnly {
+		request.SetQueryParam("public", "true")
+	} else {
+		request.SetQueryParam("include_hidden", "false")
+	}
+
+	resp, err := request.Get(fmt.Sprintf("%s/api/v1/teams", backendURL))
+	if err != nil {
+		return TeamsResponse{}, fmt.Errorf("error making request: %v", err)
+	}
+
+	if resp.StatusCode() != http.StatusOK {
+		return TeamsResponse{}, fmt.Errorf("received status code %d: %s", resp.StatusCode(), resp.Body())
+	}
+
+	var teamsResponse TeamsResponse
+	err = json.Unmarshal(resp.Body(), &teamsResponse)
+	if err != nil {
+		return TeamsResponse{}, fmt.Errorf("error parsing response: %v", err)
+	}
+	teamsResponse.Raw = append(teamsResponse.Raw[:0], resp.Body()...)
+
+	return teamsResponse, nil
+}
+
+func ListPublicTeams(
+	backendURL string,
+	accessToken string,
+	client string,
+	uid string,
+	spaceID string,
+) (TeamsResponse, error) {
+	resp, err := newRequest(accessToken, client, uid).
+		SetHeader("accept", "application/json").
+		SetQueryParam("space_id", spaceID).
+		Get(fmt.Sprintf("%s/api/v1/teams/public", backendURL))
+	if err != nil {
+		return TeamsResponse{}, fmt.Errorf("error making request: %v", err)
+	}
+
+	if resp.StatusCode() != http.StatusOK {
+		return TeamsResponse{}, fmt.Errorf("received status code %d: %s", resp.StatusCode(), resp.Body())
+	}
+
+	var teamsResponse TeamsResponse
+	err = json.Unmarshal(resp.Body(), &teamsResponse)
+	if err != nil {
+		return TeamsResponse{}, fmt.Errorf("error parsing response: %v", err)
+	}
+	teamsResponse.Raw = append(teamsResponse.Raw[:0], resp.Body()...)
+
+	return teamsResponse, nil
+}
+
 func CreateQuest(
 	backendURL string,
 	accessToken string,
@@ -126,6 +205,9 @@ func CreateQuest(
 	form.Set("space_id", request.SpaceID)
 	form.Set("parent_attributes[id]", request.ParentAnswerID)
 	form.Set("parent_attributes[content]", request.Content)
+	if request.DeltaJSON != "" {
+		form.Set("parent_attributes[delta_json]", request.DeltaJSON)
+	}
 
 	if request.MessageType != "" {
 		form.Set("parent_attributes[message_type]", request.MessageType)
@@ -178,6 +260,9 @@ func CreateAnswer(
 	form.Set("space_id", request.SpaceID)
 	form.Set("quest_id", request.QuestID)
 	form.Set("content", request.Content)
+	if request.DeltaJSON != "" {
+		form.Set("delta_json", request.DeltaJSON)
+	}
 
 	if request.ChildQuestID != "" {
 		form.Set("child_quest_id", request.ChildQuestID)
@@ -209,6 +294,81 @@ func CreateAnswer(
 	return answerResponse, nil
 }
 
+func CreateClipQuest(
+	backendURL string,
+	accessToken string,
+	client string,
+	uid string,
+	request CreateClipQuestRequest,
+) (CreateQuestResponse, error) {
+	form := neturl.Values{}
+
+	if request.URL != "" {
+		form.Set("quest[answers_attributes][0][url_attributes][address]", request.URL)
+		form.Set("quest[answers_attributes][0][url_attributes][title]", request.Title)
+	} else if request.Title != "" {
+		form.Set("quest[answers_attributes][0][url_attributes][title]", request.Title)
+	}
+
+	if request.Content != "" {
+		form.Set("quest[answers_attributes][0][content]", request.Content)
+	}
+	if request.DeltaJSON != "" {
+		form.Set("quest[answers_attributes][0][delta_json]", request.DeltaJSON)
+	}
+
+	if request.Destination != nil {
+		if destType, ok := request.Destination["type"].(string); ok {
+			form.Set("destination[type]", destType)
+		}
+		switch destID := request.Destination["id"].(type) {
+		case float64:
+			form.Set("destination[id]", fmt.Sprintf("%d", int(destID)))
+		case string:
+			form.Set("destination[id]", destID)
+		}
+	}
+
+	uploads := []MultipartFile{}
+	if len(request.Image) > 0 {
+		uploads = append(uploads, MultipartFile{
+			FieldName: "quest[answers_attributes][0][images]",
+			FileName:  "image",
+			Content:   request.Image,
+		})
+	}
+	if len(request.Video) > 0 {
+		uploads = append(uploads, MultipartFile{
+			FieldName: "quest[answers_attributes][0][recording]",
+			FileName:  "video",
+			Content:   request.Video,
+		})
+	}
+	if len(request.File) > 0 {
+		uploads = append(uploads, MultipartFile{
+			FieldName: "quest[answers_attributes][0][files]",
+			FileName:  "file",
+			Content:   request.File,
+		})
+	}
+
+	resp, err := postMultipart(backendURL, "/plugin_new/clip", accessToken, client, uid, form, uploads)
+	if err != nil {
+		return CreateQuestResponse{}, err
+	}
+
+	var quest Quest
+	err = json.Unmarshal(resp.Body(), &quest)
+	if err != nil {
+		return CreateQuestResponse{}, fmt.Errorf("error parsing response: %v", err)
+	}
+
+	return CreateQuestResponse{
+		Quest: quest,
+		Raw:   append([]byte(nil), resp.Body()...),
+	}, nil
+}
+
 func ClipLink(
 	backendURL string,
 	accessToken string,
@@ -222,62 +382,27 @@ func ClipLink(
 	content string,
 	destination map[string]interface{},
 ) (map[string]interface{}, error) {
-	form := neturl.Values{}
-
-	if url != "" {
-		form.Set("quest[answers_attributes][0][url_attributes][address]", url)
-		form.Set("quest[answers_attributes][0][url_attributes][title]", title)
-	} else if title != "" {
-		form.Set("quest[answers_attributes][0][url_attributes][title]", title)
-	}
-
-	if content != "" {
-		form.Set("quest[answers_attributes][0][content]", content)
-	}
-
-	if destination != nil {
-		if destType, ok := destination["type"].(string); ok {
-			form.Set("destination[type]", destType)
-		}
-		switch destID := destination["id"].(type) {
-		case float64:
-			form.Set("destination[id]", fmt.Sprintf("%d", int(destID)))
-		case string:
-			form.Set("destination[id]", destID)
-		}
-	}
-
-	uploads := []MultipartFile{}
-
-	if len(image) > 0 {
-		uploads = append(uploads, MultipartFile{
-			FieldName: "quest[answers_attributes][0][images]",
-			FileName:  "image",
-			Content:   image,
-		})
-	}
-	if len(video) > 0 {
-		uploads = append(uploads, MultipartFile{
-			FieldName: "quest[answers_attributes][0][recording]",
-			FileName:  "video",
-			Content:   video,
-		})
-	}
-	if len(file) > 0 {
-		uploads = append(uploads, MultipartFile{
-			FieldName: "quest[answers_attributes][0][files]",
-			FileName:  "file",
-			Content:   file,
-		})
-	}
-
-	resp, err := postMultipart(backendURL, "/plugin_new/clip", accessToken, client, uid, form, uploads)
+	clipResponse, err := CreateClipQuest(
+		backendURL,
+		accessToken,
+		client,
+		uid,
+		CreateClipQuestRequest{
+			URL:         url,
+			Content:     content,
+			Image:       image,
+			Video:       video,
+			File:        file,
+			Title:       title,
+			Destination: destination,
+		},
+	)
 	if err != nil {
 		return nil, err
 	}
 
 	var clipInfo map[string]interface{}
-	err = json.Unmarshal(resp.Body(), &clipInfo)
+	err = json.Unmarshal(clipResponse.Raw, &clipInfo)
 	if err != nil {
 		return nil, fmt.Errorf("error parsing response: %v", err)
 	}

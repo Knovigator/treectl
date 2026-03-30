@@ -3,6 +3,7 @@ package cmd
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/Knovigator/knovigator/treectl/api"
@@ -27,6 +28,7 @@ var ActionCmd = &cobra.Command{
 
 var postUrl string
 var postAttachment string
+var postStream string
 var postSpaceID string
 var postThreadType string
 var postMessageType string
@@ -35,6 +37,7 @@ var postPublic bool
 var postPrivate bool
 var createOutputFormat string
 var actionAttachment string
+var actionStream string
 var actionSpaceID string
 var actionThreadType string
 var actionMessageType string
@@ -47,7 +50,9 @@ var actionTimeout time.Duration
 
 type rootThreadCreateOptions struct {
 	Content     string
+	URL         string
 	Attachment  string
+	Stream      string
 	SpaceID     string
 	ThreadType  string
 	MessageType string
@@ -68,6 +73,7 @@ type actionResult struct {
 func init() {
 	newPostCmd.Flags().StringVarP(&postUrl, "url", "u", "", "Optional URL for the post")
 	newPostCmd.Flags().StringVarP(&postAttachment, "attachment", "f", "", "Path to the file to attach")
+	newPostCmd.Flags().StringVar(&postStream, "stream", "", "Target stream name or UUID. Defaults to private.")
 	newPostCmd.Flags().StringVar(&postSpaceID, "space-id", "", "Space ID to create the post in")
 	newPostCmd.Flags().StringVar(&postThreadType, "thread-type", "", "Optional thread_type for the new thread")
 	newPostCmd.Flags().StringVar(&postMessageType, "message-type", "", "Optional message_type for the root answer")
@@ -77,6 +83,7 @@ func init() {
 	newPostCmd.Flags().StringVarP(&createOutputFormat, "output", "o", "ascii", "Output format: ascii or json")
 
 	ActionCmd.Flags().StringVarP(&actionAttachment, "attachment", "f", "", "Path to the file to attach")
+	ActionCmd.Flags().StringVar(&actionStream, "stream", "", "Target stream name or UUID. Defaults to private.")
 	ActionCmd.Flags().StringVar(&actionSpaceID, "space-id", "", "Space ID to create the action thread in")
 	ActionCmd.Flags().StringVar(&actionThreadType, "thread-type", "", "Optional thread_type for the new thread")
 	ActionCmd.Flags().StringVar(&actionMessageType, "message-type", "", "Optional message_type for the root answer")
@@ -92,16 +99,6 @@ func runNewPost(cmd *cobra.Command, args []string) {
 	content := args[0]
 	if content == "" {
 		fmt.Println("Error: Content is required for a post.")
-		return
-	}
-
-	if postUrl != "" {
-		clipLink(postUrl, content, postAttachment, false)
-		return
-	}
-
-	if postPublic && postPrivate {
-		fmt.Println("Error: --public and --private cannot be used together.")
 		return
 	}
 
@@ -125,7 +122,9 @@ func runNewPost(cmd *cobra.Command, args []string) {
 		profile,
 		rootThreadCreateOptions{
 			Content:     content,
+			URL:         postUrl,
 			Attachment:  postAttachment,
+			Stream:      postStream,
 			SpaceID:     postSpaceID,
 			ThreadType:  postThreadType,
 			MessageType: postMessageType,
@@ -149,10 +148,6 @@ func runAction(cmd *cobra.Command, args []string) {
 		return
 	}
 
-	if actionPublic && actionPrivate {
-		fmt.Println("Error: --public and --private cannot be used together.")
-		return
-	}
 	if actionPollInterval <= 0 {
 		fmt.Println("Error: --poll-interval must be greater than zero.")
 		return
@@ -182,6 +177,7 @@ func runAction(cmd *cobra.Command, args []string) {
 		profile,
 		rootThreadCreateOptions{
 			Content:     content,
+			Stream:      actionStream,
 			Attachment:  actionAttachment,
 			SpaceID:     actionSpaceID,
 			ThreadType:  actionThreadType,
@@ -238,6 +234,15 @@ func createRootThread(profile profileConfig, options rootThreadCreateOptions) (a
 		return api.CreateQuestResponse{}, err
 	}
 
+	resolvedTarget, err := resolveRootThreadTarget(profile, options)
+	if err != nil {
+		return api.CreateQuestResponse{}, err
+	}
+
+	if options.URL != "" || resolvedTarget.Kind == "clips" {
+		return createClipQuest(profile, options.URL, options.Content, options.Attachment, resolvedTarget)
+	}
+
 	questID, err := newUUID()
 	if err != nil {
 		return api.CreateQuestResponse{}, fmt.Errorf("error generating thread id: %w", err)
@@ -258,6 +263,24 @@ func createRootThread(profile profileConfig, options rootThreadCreateOptions) (a
 		return api.CreateQuestResponse{}, err
 	}
 
+	deltaJSON, err := textToDeltaJSONString(options.Content)
+	if err != nil {
+		return api.CreateQuestResponse{}, err
+	}
+
+	var publicValue *bool
+	var privateValue *bool
+	teamID := ""
+
+	switch resolvedTarget.Kind {
+	case "public":
+		publicValue = boolPtr(true)
+	case "private":
+		privateValue = boolPtr(true)
+	case "team":
+		teamID = resolvedTarget.ID
+	}
+
 	result, err := api.CreateQuest(
 		profile.BackendURL,
 		profile.AccessToken,
@@ -268,11 +291,12 @@ func createRootThread(profile profileConfig, options rootThreadCreateOptions) (a
 			ParentAnswerID: parentAnswerID,
 			SpaceID:        spaceID,
 			Content:        options.Content,
+			DeltaJSON:      deltaJSON,
 			MessageType:    options.MessageType,
 			ThreadType:     options.ThreadType,
-			TeamID:         options.TeamID,
-			Public:         options.Public,
-			Private:        options.Private,
+			TeamID:         teamID,
+			Public:         publicValue,
+			Private:        privateValue,
 			Uploads:        uploads,
 		},
 	)
@@ -313,6 +337,34 @@ func waitForGeneratedMedia(
 
 		time.Sleep(pollInterval)
 	}
+}
+
+func resolveRootThreadTarget(profile profileConfig, options rootThreadCreateOptions) (streamTarget, error) {
+	if strings.TrimSpace(options.Stream) != "" {
+		return resolveStreamTarget(profile, options.Stream, defaultPrivateStreamTarget())
+	}
+
+	if strings.TrimSpace(options.TeamID) != "" {
+		return resolveStreamTarget(profile, options.TeamID, defaultPrivateStreamTarget())
+	}
+
+	if options.Public != nil && *options.Public && options.Private != nil && *options.Private {
+		return streamTarget{}, fmt.Errorf("conflicting stream flags")
+	}
+
+	if options.Public != nil && *options.Public {
+		return resolveStreamTarget(profile, "public", defaultPrivateStreamTarget())
+	}
+
+	if options.Private != nil && *options.Private {
+		return resolveStreamTarget(profile, "private", defaultPrivateStreamTarget())
+	}
+
+	return defaultPrivateStreamTarget(), nil
+}
+
+func boolPtr(value bool) *bool {
+	return &value
 }
 
 func printActionResult(result actionResult, outputFormat string) {

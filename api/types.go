@@ -29,9 +29,22 @@ type AnswerResponse struct {
 	Raw    json.RawMessage `json:"-"`
 }
 
+type TeamsResponse struct {
+	Teams []TeamRef       `json:"teams"`
+	Raw   json.RawMessage `json:"-"`
+}
+
 type MessagesResponse struct {
 	Answers []Answer        `json:"answers"`
 	Raw     json.RawMessage `json:"-"`
+}
+
+type TeamRef struct {
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	ShortName string `json:"short_name"`
+	Path      string `json:"path"`
+	URL       string `json:"url"`
 }
 
 type Quest struct {
