@@ -935,7 +935,7 @@ func actionResultFromAnswer(profile profileConfig, threadID string, answer api.A
 		ThreadID:      resolvedThreadID,
 		AnswerID:      answer.ID,
 		ThreadURL:     threadLink(profile, resolvedThreadID),
-		MediaURLs:     answer.CanonicalMediaURLs(profile.BackendURL),
+		MediaURLs:     api.ResolveAnswerMediaURLs(answer, profile.BackendURL),
 		FailureReason: answer.GenerationFailureReason(),
 	}
 }

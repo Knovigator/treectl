@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	neturl "net/url"
+	"strings"
 	"time"
 
 	"github.com/go-resty/resty/v2"
@@ -472,4 +473,112 @@ func postMultipart(
 	}
 
 	return resp, nil
+}
+
+func ResolveAnswerMediaURLs(answer Answer, fallbackBase string) []string {
+	canonicalURLs := answer.CanonicalMediaURLs(fallbackBase)
+	resolvedURLs := make([]string, 0, len(canonicalURLs))
+	seenURLs := map[string]bool{}
+
+	for _, mediaURL := range canonicalURLs {
+		resolvedURL := ResolveFinalURL(mediaURL, fallbackBase)
+		if strings.TrimSpace(resolvedURL) == "" || seenURLs[resolvedURL] {
+			continue
+		}
+
+		seenURLs[resolvedURL] = true
+		resolvedURLs = append(resolvedURLs, resolvedURL)
+	}
+
+	return resolvedURLs
+}
+
+func ResolveFinalURL(rawURL string, fallbackBase string) string {
+	canonicalURL := canonicalizeURL(rawURL, fallbackBase)
+	if canonicalURL == "" {
+		return ""
+	}
+
+	canonicalURL = preferredResolvableURL(canonicalURL, fallbackBase)
+
+	if !shouldResolveFinalURL(canonicalURL, fallbackBase) {
+		return canonicalURL
+	}
+
+	request, err := http.NewRequest(http.MethodHead, canonicalURL, nil)
+	if err != nil {
+		return canonicalURL
+	}
+
+	client := &http.Client{
+		Timeout: 10 * time.Second,
+		CheckRedirect: func(request *http.Request, via []*http.Request) error {
+			if len(via) >= 10 {
+				return http.ErrUseLastResponse
+			}
+
+			return nil
+		},
+	}
+
+	response, err := client.Do(request)
+	if response != nil {
+		defer response.Body.Close()
+		finalURL := strings.TrimSpace(response.Request.URL.String())
+		if finalURL != "" {
+			return finalURL
+		}
+	}
+
+	if err != nil {
+		return canonicalURL
+	}
+
+	return canonicalURL
+}
+
+func shouldResolveFinalURL(candidate string, fallbackBase string) bool {
+	candidateURL, err := neturl.Parse(candidate)
+	if err != nil {
+		return false
+	}
+
+	if candidateURL.Scheme != "http" && candidateURL.Scheme != "https" {
+		return false
+	}
+
+	if strings.Contains(candidateURL.Path, "/api/v1/blob/") ||
+		strings.Contains(candidateURL.Path, "/api/v1/answers/") ||
+		strings.Contains(candidateURL.Path, "/rails/active_storage/") {
+		return true
+	}
+
+	fallbackURL, err := neturl.Parse(strings.TrimSpace(fallbackBase))
+	if err != nil {
+		return false
+	}
+
+	return fallbackURL.Host != "" && strings.EqualFold(candidateURL.Host, fallbackURL.Host)
+}
+
+func preferredResolvableURL(candidate string, fallbackBase string) string {
+	candidateURL, err := neturl.Parse(candidate)
+	if err != nil {
+		return candidate
+	}
+
+	if !strings.Contains(candidateURL.Path, "/api/v1/blob/") &&
+		!strings.Contains(candidateURL.Path, "/api/v1/answers/") &&
+		!strings.Contains(candidateURL.Path, "/rails/active_storage/") {
+		return candidate
+	}
+
+	fallbackURL, err := neturl.Parse(strings.TrimSpace(fallbackBase))
+	if err != nil || fallbackURL.Host == "" {
+		return candidate
+	}
+
+	candidateURL.Scheme = fallbackURL.Scheme
+	candidateURL.Host = fallbackURL.Host
+	return candidateURL.String()
 }
