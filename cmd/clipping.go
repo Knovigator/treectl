@@ -54,10 +54,20 @@ func textToDeltaJSONString(content string) (string, error) {
 		return "", nil
 	}
 
-	deltaPayload := map[string][]map[string]string{
-		"ops": {
-			{"insert": content},
-		},
+	return marshalDeltaOps(buildPlainTextDeltaOps(content))
+}
+
+func actionTextToDeltaJSONString(content string) (string, error) {
+	if strings.TrimSpace(content) == "" {
+		return "", nil
+	}
+
+	return marshalDeltaOps(buildActionTextDeltaOps(content))
+}
+
+func marshalDeltaOps(ops []map[string]interface{}) (string, error) {
+	deltaPayload := map[string][]map[string]interface{}{
+		"ops": ops,
 	}
 
 	deltaJSON, err := json.Marshal(deltaPayload)
@@ -66,6 +76,49 @@ func textToDeltaJSONString(content string) (string, error) {
 	}
 
 	return string(deltaJSON), nil
+}
+
+func buildPlainTextDeltaOps(content string) []map[string]interface{} {
+	return []map[string]interface{}{
+		{"insert": content},
+	}
+}
+
+func buildActionTextDeltaOps(content string) []map[string]interface{} {
+	actionTagPattern := regexp.MustCompile(`\B!\w+`)
+	matches := actionTagPattern.FindAllStringIndex(content, -1)
+	if len(matches) == 0 {
+		return buildPlainTextDeltaOps(content)
+	}
+
+	ops := []map[string]interface{}{}
+	lastIndex := 0
+
+	for _, matchRange := range matches {
+		startIndex := matchRange[0]
+		endIndex := matchRange[1]
+
+		if startIndex > lastIndex {
+			ops = append(ops, map[string]interface{}{"insert": content[lastIndex:startIndex]})
+		}
+
+		ops = append(
+			ops,
+			map[string]interface{}{
+				"insert": content[startIndex:endIndex],
+				"attributes": map[string]bool{
+					"bold": true,
+				},
+			},
+		)
+		lastIndex = endIndex
+	}
+
+	if lastIndex < len(content) {
+		ops = append(ops, map[string]interface{}{"insert": content[lastIndex:]})
+	}
+
+	return ops
 }
 
 func prepareAttachmentUploads(attachmentPath, imageField, recordingField, fileField string) ([]api.MultipartFile, error) {

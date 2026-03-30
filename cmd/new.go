@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/Knovigator/knovigator/treectl/api"
 	"github.com/spf13/cobra"
@@ -30,6 +31,7 @@ var replyMessageType string
 type replyCreateOptions struct {
 	ReplyToQuestID string
 	Content        string
+	DeltaJSON      string
 	Attachment     string
 	SpaceID        string
 	MessageType    string
@@ -105,6 +107,9 @@ func createReply(profile profileConfig, options replyCreateOptions) (api.CreateA
 	deltaJSON, err := textToDeltaJSONString(options.Content)
 	if err != nil {
 		return api.CreateAnswerResponse{}, err
+	}
+	if strings.TrimSpace(options.DeltaJSON) != "" {
+		deltaJSON = options.DeltaJSON
 	}
 
 	result, err := api.CreateAnswer(

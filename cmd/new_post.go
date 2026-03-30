@@ -88,6 +88,7 @@ var actionStatusTimeout time.Duration
 
 type rootThreadCreateOptions struct {
 	Content     string
+	DeltaJSON   string
 	URL         string
 	Attachment  string
 	Stream      string
@@ -381,6 +382,9 @@ func createRootThread(profile profileConfig, options rootThreadCreateOptions) (a
 	deltaJSON, err := textToDeltaJSONString(options.Content)
 	if err != nil {
 		return api.CreateQuestResponse{}, err
+	}
+	if strings.TrimSpace(options.DeltaJSON) != "" {
+		deltaJSON = options.DeltaJSON
 	}
 
 	var publicValue *bool
@@ -758,6 +762,11 @@ func createActionSubmission(
 	publicValue *bool,
 	privateValue *bool,
 ) (actionSubmission, error) {
+	actionDeltaJSON, err := actionTextToDeltaJSONString(invocation.NormalizedContent)
+	if err != nil {
+		return actionSubmission{}, fmt.Errorf("building action delta_json: %w", err)
+	}
+
 	if strings.TrimSpace(actionReplyTo) != "" {
 		err := rejectRootOnlyPostFlags(cmd, actionReplyTo)
 		if err != nil {
@@ -769,6 +778,7 @@ func createActionSubmission(
 			replyCreateOptions{
 				ReplyToQuestID: strings.TrimSpace(actionReplyTo),
 				Content:        invocation.NormalizedContent,
+				DeltaJSON:      actionDeltaJSON,
 				Attachment:     actionAttachment,
 				SpaceID:        actionSpaceID,
 				MessageType:    actionMessageType,
@@ -793,6 +803,7 @@ func createActionSubmission(
 		profile,
 		rootThreadCreateOptions{
 			Content:     invocation.NormalizedContent,
+			DeltaJSON:   actionDeltaJSON,
 			Stream:      actionStream,
 			Attachment:  actionAttachment,
 			SpaceID:     actionSpaceID,
