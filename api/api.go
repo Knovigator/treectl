@@ -19,29 +19,31 @@ type MultipartFile struct {
 }
 
 type CreateQuestRequest struct {
-	QuestID        string
-	ParentAnswerID string
-	SpaceID        string
-	Content        string
-	DeltaJSON      string
-	MessageType    string
-	ThreadType     string
-	TeamID         string
-	Public         *bool
-	Private        *bool
-	Uploads        []MultipartFile
+	QuestID            string
+	ParentAnswerID     string
+	SpaceID            string
+	Content            string
+	DeltaJSON          string
+	ActionRequestsJSON string
+	MessageType        string
+	ThreadType         string
+	TeamID             string
+	Public             *bool
+	Private            *bool
+	Uploads            []MultipartFile
 }
 
 type CreateAnswerRequest struct {
-	AnswerID     string
-	ChildQuestID string
-	QuestID      string
-	SpaceID      string
-	UserID       string
-	Content      string
-	DeltaJSON    string
-	MessageType  string
-	Uploads      []MultipartFile
+	AnswerID           string
+	ChildQuestID       string
+	QuestID            string
+	SpaceID            string
+	UserID             string
+	Content            string
+	DeltaJSON          string
+	ActionRequestsJSON string
+	MessageType        string
+	Uploads            []MultipartFile
 }
 
 type CreateClipQuestRequest struct {
@@ -277,6 +279,9 @@ func CreateQuest(
 	if request.DeltaJSON != "" {
 		form.Set("parent_attributes[delta_json]", request.DeltaJSON)
 	}
+	if request.ActionRequestsJSON != "" {
+		form.Set("parent_attributes[action_requests]", request.ActionRequestsJSON)
+	}
 
 	if request.MessageType != "" {
 		form.Set("parent_attributes[message_type]", request.MessageType)
@@ -334,6 +339,9 @@ func CreateAnswer(
 	form.Set("content", request.Content)
 	if request.DeltaJSON != "" {
 		form.Set("delta_json", request.DeltaJSON)
+	}
+	if request.ActionRequestsJSON != "" {
+		form.Set("action_requests", request.ActionRequestsJSON)
 	}
 
 	if request.ChildQuestID != "" {

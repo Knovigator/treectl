@@ -93,17 +93,18 @@ var actionStatusPollInterval time.Duration
 var actionStatusTimeout time.Duration
 
 type rootThreadCreateOptions struct {
-	Content     string
-	DeltaJSON   string
-	URL         string
-	Attachment  string
-	Stream      string
-	SpaceID     string
-	ThreadType  string
-	MessageType string
-	TeamID      string
-	Public      *bool
-	Private     *bool
+	Content            string
+	DeltaJSON          string
+	ActionRequestsJSON string
+	URL                string
+	Attachment         string
+	Stream             string
+	SpaceID            string
+	ThreadType         string
+	MessageType        string
+	TeamID             string
+	Public             *bool
+	Private            *bool
 }
 
 type actionResult struct {
@@ -454,17 +455,18 @@ func createRootThread(profile profileConfig, options rootThreadCreateOptions) (a
 		profile.Client,
 		profile.UID,
 		api.CreateQuestRequest{
-			QuestID:        questID,
-			ParentAnswerID: parentAnswerID,
-			SpaceID:        spaceID,
-			Content:        options.Content,
-			DeltaJSON:      deltaJSON,
-			MessageType:    options.MessageType,
-			ThreadType:     options.ThreadType,
-			TeamID:         teamID,
-			Public:         publicValue,
-			Private:        privateValue,
-			Uploads:        uploads,
+			QuestID:            questID,
+			ParentAnswerID:     parentAnswerID,
+			SpaceID:            spaceID,
+			Content:            options.Content,
+			DeltaJSON:          deltaJSON,
+			ActionRequestsJSON: options.ActionRequestsJSON,
+			MessageType:        options.MessageType,
+			ThreadType:         options.ThreadType,
+			TeamID:             teamID,
+			Public:             publicValue,
+			Private:            privateValue,
+			Uploads:            uploads,
 		},
 	)
 	if err != nil {
@@ -823,6 +825,10 @@ func createActionSubmission(
 	if err != nil {
 		return actionSubmission{}, fmt.Errorf("building action delta_json: %w", err)
 	}
+	actionRequestsJSON, err := actionRequestsJSONString(invocation)
+	if err != nil {
+		return actionSubmission{}, fmt.Errorf("building action_requests: %w", err)
+	}
 
 	if strings.TrimSpace(actionReplyTo) != "" {
 		replyToQuestID, err := normalizeReplyTarget(actionReplyTo)
@@ -838,12 +844,13 @@ func createActionSubmission(
 		replyResult, err := createReply(
 			profile,
 			replyCreateOptions{
-				ReplyToQuestID: replyToQuestID,
-				Content:        invocation.NormalizedContent,
-				DeltaJSON:      actionDeltaJSON,
-				Attachment:     actionAttachment,
-				SpaceID:        actionSpaceID,
-				MessageType:    actionMessageType,
+				ReplyToQuestID:     replyToQuestID,
+				Content:            invocation.NormalizedContent,
+				DeltaJSON:          actionDeltaJSON,
+				ActionRequestsJSON: actionRequestsJSON,
+				Attachment:         actionAttachment,
+				SpaceID:            actionSpaceID,
+				MessageType:        actionMessageType,
 			},
 		)
 		if err != nil {
@@ -864,16 +871,17 @@ func createActionSubmission(
 	createResult, err := createRootThread(
 		profile,
 		rootThreadCreateOptions{
-			Content:     invocation.NormalizedContent,
-			DeltaJSON:   actionDeltaJSON,
-			Stream:      actionStream,
-			Attachment:  actionAttachment,
-			SpaceID:     actionSpaceID,
-			ThreadType:  actionThreadType,
-			MessageType: actionMessageType,
-			TeamID:      actionTeamID,
-			Public:      publicValue,
-			Private:     privateValue,
+			Content:            invocation.NormalizedContent,
+			DeltaJSON:          actionDeltaJSON,
+			ActionRequestsJSON: actionRequestsJSON,
+			Stream:             actionStream,
+			Attachment:         actionAttachment,
+			SpaceID:            actionSpaceID,
+			ThreadType:         actionThreadType,
+			MessageType:        actionMessageType,
+			TeamID:             actionTeamID,
+			Public:             publicValue,
+			Private:            privateValue,
 		},
 	)
 	if err != nil {
@@ -888,6 +896,31 @@ func createActionSubmission(
 		ThreadID: createResult.Quest.ID,
 		Answer:   *createResult.Quest.Parent,
 	}, nil
+}
+
+func actionRequestsJSONString(invocation actionInvocation) (string, error) {
+	actionID, err := newUUID()
+	if err != nil {
+		return "", fmt.Errorf("error generating action request id: %w", err)
+	}
+
+	payload := []map[string]interface{}{
+		{
+			"id":               actionID,
+			"client_id":        actionID,
+			"tag":              invocation.Tag,
+			"prompt":           invocation.Prompt,
+			"kind":             "model",
+			"generation_count": 1,
+		},
+	}
+
+	encoded, err := json.Marshal(payload)
+	if err != nil {
+		return "", err
+	}
+
+	return string(encoded), nil
 }
 
 func pollActionResult(

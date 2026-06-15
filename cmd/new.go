@@ -29,12 +29,13 @@ var replySpaceID string
 var replyMessageType string
 
 type replyCreateOptions struct {
-	ReplyToQuestID string
-	Content        string
-	DeltaJSON      string
-	Attachment     string
-	SpaceID        string
-	MessageType    string
+	ReplyToQuestID     string
+	Content            string
+	DeltaJSON          string
+	ActionRequestsJSON string
+	Attachment         string
+	SpaceID            string
+	MessageType        string
 }
 
 func init() {
@@ -127,15 +128,16 @@ func createReply(profile profileConfig, options replyCreateOptions) (api.CreateA
 		profile.Client,
 		profile.UID,
 		api.CreateAnswerRequest{
-			AnswerID:     answerID,
-			ChildQuestID: childQuestID,
-			QuestID:      options.ReplyToQuestID,
-			SpaceID:      spaceID,
-			UserID:       profile.CurrentUserID,
-			Content:      options.Content,
-			DeltaJSON:    deltaJSON,
-			MessageType:  options.MessageType,
-			Uploads:      uploads,
+			AnswerID:           answerID,
+			ChildQuestID:       childQuestID,
+			QuestID:            options.ReplyToQuestID,
+			SpaceID:            spaceID,
+			UserID:             profile.CurrentUserID,
+			Content:            options.Content,
+			DeltaJSON:          deltaJSON,
+			ActionRequestsJSON: options.ActionRequestsJSON,
+			MessageType:        options.MessageType,
+			Uploads:            uploads,
 		},
 	)
 	if err != nil {

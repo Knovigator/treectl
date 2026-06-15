@@ -122,6 +122,7 @@ type Answer struct {
 	ImagesV2                     []AnswerImageV2     `json:"images_v2"`
 	ImageURLs                    []AnswerImageURL    `json:"image_urls"`
 	FileURLs                     []AnswerFileURL     `json:"file_urls"`
+	AIRuns                       []AIRun             `json:"ai_runs"`
 	IsGeneratingImage            bool                `json:"is_generating_image"`
 	ImageGenerationFailed        bool                `json:"image_generation_failed"`
 	ImageGenerationFailureReason *string             `json:"image_generation_failure_reason"`
@@ -184,6 +185,18 @@ type AnswerImageV2 struct {
 	ImageFilename    string            `json:"image_filename"`
 	URLs             map[string]string `json:"urls"`
 	PreviewURL       *string           `json:"preview_url"`
+}
+
+type AIRun struct {
+	ID         string        `json:"id"`
+	Status     string        `json:"status"`
+	OutputURLs []AIRunOutput `json:"output_urls"`
+}
+
+type AIRunOutput struct {
+	URL      string            `json:"url"`
+	URLs     map[string]string `json:"urls"`
+	Variants map[string]string `json:"variants"`
 }
 
 type BsvAttachment struct {
@@ -318,6 +331,18 @@ func (answer Answer) MediaURLs() []string {
 		}
 		for _, previewURL := range fileURL.PreviewURLs {
 			appendURL(previewURL)
+		}
+	}
+
+	for _, run := range answer.AIRuns {
+		for _, output := range run.OutputURLs {
+			appendURL(output.URL)
+			for _, outputURL := range output.URLs {
+				appendURL(outputURL)
+			}
+			for _, variantURL := range output.Variants {
+				appendURL(variantURL)
+			}
 		}
 	}
 
