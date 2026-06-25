@@ -5,7 +5,7 @@ import (
 	"io"
 	"os"
 
-	"github.com/Knovigator/knovigator/treectl/cmd"
+	"github.com/Knovigator/treectl/cmd"
 	"github.com/adrg/xdg"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"

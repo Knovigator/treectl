@@ -1,0 +1,110 @@
+name: release
+
+on:
+    push:
+        tags:
+            - 'v*'
+    workflow_dispatch:
+        inputs:
+            tag:
+                description: 'Release tag to build, for example v0.1.0'
+                required: true
+                type: string
+
+permissions:
+    contents: write
+
+jobs:
+    release:
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v4
+
+            - name: Resolve release tag
+              id: release
+              run: |
+                  set -euo pipefail
+
+                  tag="${GITHUB_REF_NAME}"
+                  if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
+                      tag="${{ inputs.tag }}"
+                  fi
+
+                  case "$tag" in
+                      v*) ;;
+                      *)
+                          echo "treectl releases must use tags like v0.1.0" >&2
+                          exit 1
+                          ;;
+                  esac
+
+                  echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+            - name: Checkout requested tag
+              if: github.event_name == 'workflow_dispatch'
+              env:
+                  TREECTL_RELEASE_TAG: ${{ steps.release.outputs.tag }}
+              run: |
+                  set -euo pipefail
+                  git fetch --force origin "refs/tags/${TREECTL_RELEASE_TAG}:refs/tags/${TREECTL_RELEASE_TAG}"
+                  git checkout --detach "$TREECTL_RELEASE_TAG"
+
+            - uses: actions/setup-go@v5
+              with:
+                  go-version: '1.22.x'
+                  cache-dependency-path: go.sum
+
+            - name: Test
+              run: go test ./...
+
+            - name: Build release artifacts
+              env:
+                  TREECTL_VERSION: ${{ steps.release.outputs.tag }}
+              run: |
+                  set -euo pipefail
+
+                  rm -rf dist
+                  mkdir -p dist
+
+                  build_target() {
+                      goos="$1"
+                      goarch="$2"
+                      ext=""
+                      if [ "$goos" = "windows" ]; then
+                          ext=".exe"
+                      fi
+
+                      package="treectl_${TREECTL_VERSION}_${goos}_${goarch}"
+                      workdir="dist/${package}"
+                      mkdir -p "$workdir"
+
+                      CGO_ENABLED=0 GOOS="$goos" GOARCH="$goarch" go build \
+                          -trimpath \
+                          -ldflags "-s -w" \
+                          -o "${workdir}/treectl${ext}" \
+                          .
+
+                      if [ "$goos" = "windows" ]; then
+                          (cd "$workdir" && zip -q -r "../${package}.zip" .)
+                      else
+                          tar -C "$workdir" -czf "dist/${package}.tar.gz" .
+                      fi
+
+                      rm -rf "$workdir"
+                  }
+
+                  build_target darwin amd64
+                  build_target darwin arm64
+                  build_target linux amd64
+                  build_target linux arm64
+                  build_target windows amd64
+
+                  (cd dist && sha256sum treectl_* > checksums.txt)
+
+            - name: Publish GitHub release
+              uses: softprops/action-gh-release@v2
+              with:
+                  tag_name: ${{ steps.release.outputs.tag }}
+                  name: treectl ${{ steps.release.outputs.tag }}
+                  files: dist/*
+                  generate_release_notes: true

@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	treectlcontent "github.com/Knovigator/knovigator/treectl/content"
+	treectlcontent "github.com/Knovigator/treectl/content"
 	"github.com/spf13/cobra"
 )
 

@@ -12,7 +12,7 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/Knovigator/knovigator/treectl/api"
+	"github.com/Knovigator/treectl/api"
 )
 
 type streamTarget struct {
