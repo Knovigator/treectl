@@ -12,9 +12,11 @@ import (
 )
 
 var rootCmd = &cobra.Command{
-	Use:   "treectl",
-	Short: "treectl controls Treechat",
-	Long:  `A CLI application for interacting with Treechat.`,
+	Use:           "treectl",
+	Short:         "treectl controls Treechat",
+	Long:          `A CLI application for interacting with Treechat.`,
+	SilenceErrors: true,
+	SilenceUsage:  true,
 }
 
 const bashCompletionPrelude = `
@@ -101,7 +103,7 @@ func initConfig() {
 
 func main() {
 	if err := rootCmd.Execute(); err != nil {
-		fmt.Println(err)
+		fmt.Fprintln(os.Stderr, "Error:", err)
 		os.Exit(1)
 	}
 }

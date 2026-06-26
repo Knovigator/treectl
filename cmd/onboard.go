@@ -12,7 +12,7 @@ var OnboardCmd = &cobra.Command{
 	Use:   "onboard",
 	Short: "Output agent instructions for treectl",
 	Long:  "Output agent-facing onboarding guidance and packaged-skill installation instructions for treectl.",
-	Run:   runOnboard,
+	RunE:  runOnboard,
 }
 
 var onboardShort bool
@@ -27,10 +27,9 @@ func init() {
 	OnboardCmd.Flags().StringVarP(&onboardOutputPath, "output", "o", "", "Write to file instead of stdout")
 }
 
-func runOnboard(cmd *cobra.Command, args []string) {
+func runOnboard(cmd *cobra.Command, args []string) error {
 	if onboardShort && onboardLong {
-		fmt.Println("Error: use only one of --short or --long.")
-		return
+		return fmt.Errorf("use only one of --short or --long")
 	}
 
 	mode := "long"
@@ -40,8 +39,7 @@ func runOnboard(cmd *cobra.Command, args []string) {
 
 	content, err := treectlcontent.BuildOnboardContent(mode)
 	if err != nil {
-		fmt.Println("Error:", err)
-		return
+		return err
 	}
 
 	if onboardAgentsMD {
@@ -51,23 +49,22 @@ func runOnboard(cmd *cobra.Command, args []string) {
 			content, err = treectlcontent.OnboardLong()
 		}
 		if err != nil {
-			fmt.Println("Error:", err)
-			return
+			return err
 		}
 	}
 
 	if onboardOutputPath != "" {
 		err = os.WriteFile(onboardOutputPath, []byte(content), 0644)
 		if err != nil {
-			fmt.Println("Error:", err)
-			return
+			return err
 		}
 		fmt.Printf("Written to %s\n", onboardOutputPath)
-		return
+		return nil
 	}
 
 	fmt.Print(content)
 	if len(content) == 0 || content[len(content)-1] != '\n' {
 		fmt.Println()
 	}
+	return nil
 }

@@ -21,20 +21,18 @@ type streamTarget struct {
 	Name string
 }
 
-func clipLink(url, content, attachment string, target streamTarget, outputFormat string) {
+func clipLink(url, content, attachment string, target streamTarget, outputFormat string) error {
 	profile, err := requireAuthenticatedProfile()
 	if err != nil {
-		fmt.Println("Error:", err)
-		return
+		return err
 	}
 
 	result, err := createClipQuest(profile, url, content, attachment, target)
 	if err != nil {
-		fmt.Println("Error creating post:", err)
-		return
+		return fmt.Errorf("creating post: %w", err)
 	}
 
-	printCreateQuestResult(profile, result, outputFormat)
+	return printCreateQuestResult(profile, result, outputFormat)
 }
 
 func resolveSpaceID(profile profileConfig, explicitSpaceID string) (string, error) {
@@ -464,15 +462,17 @@ func clipDestinationFromTarget(target streamTarget) map[string]interface{} {
 	}
 }
 
-func printCreateQuestResult(profile profileConfig, result api.CreateQuestResponse, outputFormat string) {
+func printCreateQuestResult(profile profileConfig, result api.CreateQuestResponse, outputFormat string) error {
 	if outputFormat == "json" {
 		prettyJSON, err := api.PrettyJSON(result.Raw)
 		if err != nil {
-			fmt.Printf("Error formatting JSON: %v\n", err)
-			return
+			return fmt.Errorf("formatting JSON: %w", err)
 		}
 		fmt.Println(prettyJSON)
-		return
+		return nil
+	}
+	if outputFormat != "ascii" {
+		return invalidOutputFormatError(outputFormat)
 	}
 
 	rootAnswerID := ""
@@ -482,17 +482,20 @@ func printCreateQuestResult(profile profileConfig, result api.CreateQuestRespons
 
 	fmt.Printf("Post created. Thread: %s Root answer: %s\n", result.Quest.ID, rootAnswerID)
 	fmt.Printf("Link: %s\n", threadLink(profile, result.Quest.ID))
+	return nil
 }
 
-func printCreateAnswerResult(profile profileConfig, result api.CreateAnswerResponse, outputFormat string) {
+func printCreateAnswerResult(profile profileConfig, result api.CreateAnswerResponse, outputFormat string) error {
 	if outputFormat == "json" {
 		prettyJSON, err := api.PrettyJSON(result.Raw)
 		if err != nil {
-			fmt.Printf("Error formatting JSON: %v\n", err)
-			return
+			return fmt.Errorf("formatting JSON: %w", err)
 		}
 		fmt.Println(prettyJSON)
-		return
+		return nil
+	}
+	if outputFormat != "ascii" {
+		return invalidOutputFormatError(outputFormat)
 	}
 
 	threadID := result.Answer.QuestID
@@ -504,6 +507,7 @@ func printCreateAnswerResult(profile profileConfig, result api.CreateAnswerRespo
 	if threadID != "" {
 		fmt.Printf("Link: %s\n", threadLink(profile, threadID))
 	}
+	return nil
 }
 
 func getMimeType(filePath string) string {
@@ -527,4 +531,8 @@ func resolveOutputFormat(outputFormat string, jsonRequested bool) string {
 	}
 
 	return trimmedOutputFormat
+}
+
+func invalidOutputFormatError(outputFormat string) error {
+	return fmt.Errorf("invalid output format: %s. Use 'ascii' or 'json'", outputFormat)
 }

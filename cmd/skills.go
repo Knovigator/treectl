@@ -18,21 +18,21 @@ var SkillsCmd = &cobra.Command{
 var skillsListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List packaged skills embedded in treectl",
-	Run:   runSkillsList,
+	RunE:  runSkillsList,
 }
 
 var skillsEmitCmd = &cobra.Command{
 	Use:   "emit <name>",
 	Short: "Print packaged skill content",
 	Args:  cobra.ExactArgs(1),
-	Run:   runSkillsEmit,
+	RunE:  runSkillsEmit,
 }
 
 var skillsInstallCmd = &cobra.Command{
 	Use:   "install [name]",
 	Short: "Install packaged skill content to a target skills directory",
 	Args:  cobra.MaximumNArgs(1),
-	Run:   runSkillsInstall,
+	RunE:  runSkillsInstall,
 }
 
 var skillsEmitFormat string
@@ -53,11 +53,10 @@ func init() {
 	SkillsCmd.AddCommand(skillsInstallCmd)
 }
 
-func runSkillsList(cmd *cobra.Command, args []string) {
+func runSkillsList(cmd *cobra.Command, args []string) error {
 	skills, err := treectlcontent.ListPackagedSkills()
 	if err != nil {
-		fmt.Println("Error:", err)
-		return
+		return err
 	}
 
 	fmt.Println("Packaged skills:")
@@ -69,30 +68,27 @@ func runSkillsList(cmd *cobra.Command, args []string) {
 	fmt.Printf("- --claude -> %s\n", filepath.Join(userHomeDir(), ".claude", "skills"))
 	fmt.Printf("- --codex  -> %s\n", filepath.Join(userHomeDir(), ".codex", "skills"))
 	fmt.Printf("- --pi     -> %s\n", filepath.Join(userHomeDir(), ".pi", "agent", "skills"))
+	return nil
 }
 
-func runSkillsEmit(cmd *cobra.Command, args []string) {
+func runSkillsEmit(cmd *cobra.Command, args []string) error {
 	format := strings.TrimSpace(skillsEmitFormat)
 	if format != "skill-md" && format != "openai-yaml" {
-		fmt.Println("Error: invalid --format. Use 'skill-md' or 'openai-yaml'.")
-		return
+		return fmt.Errorf("invalid --format. Use 'skill-md' or 'openai-yaml'")
 	}
 
 	skillNames, err := resolvePackagedSkillKeys(args[0])
 	if err != nil {
-		fmt.Println("Error:", err)
-		return
+		return err
 	}
 
 	for index, skillKey := range skillNames {
 		skill, err := treectlcontent.GetPackagedSkill(skillKey)
 		if err != nil {
-			fmt.Println("Error:", err)
-			return
+			return err
 		}
 		if skill == nil {
-			fmt.Printf("Error: unknown skill %q\n", skillKey)
-			return
+			return fmt.Errorf("unknown skill %q", skillKey)
 		}
 
 		if len(skillNames) > 1 && index > 0 {
@@ -115,9 +111,10 @@ func runSkillsEmit(cmd *cobra.Command, args []string) {
 			fmt.Println()
 		}
 	}
+	return nil
 }
 
-func runSkillsInstall(cmd *cobra.Command, args []string) {
+func runSkillsInstall(cmd *cobra.Command, args []string) error {
 	skillKey := "all"
 	if len(args) == 1 {
 		skillKey = args[0]
@@ -125,14 +122,12 @@ func runSkillsInstall(cmd *cobra.Command, args []string) {
 
 	installRoots := resolveSkillInstallRoots()
 	if len(installRoots) == 0 {
-		fmt.Println("Error: specify at least one target with --dir, --claude, --codex, or --pi.")
-		return
+		return fmt.Errorf("specify at least one target with --dir, --claude, --codex, or --pi")
 	}
 
 	skillKeys, err := resolvePackagedSkillKeys(skillKey)
 	if err != nil {
-		fmt.Println("Error:", err)
-		return
+		return err
 	}
 
 	for _, root := range installRoots {
@@ -140,22 +135,20 @@ func runSkillsInstall(cmd *cobra.Command, args []string) {
 		for _, key := range skillKeys {
 			skill, err := treectlcontent.GetPackagedSkill(key)
 			if err != nil {
-				fmt.Println("Error:", err)
-				return
+				return err
 			}
 			if skill == nil {
-				fmt.Printf("Error: unknown skill %q\n", key)
-				return
+				return fmt.Errorf("unknown skill %q", key)
 			}
 
 			installedDir, err := treectlcontent.InstallPackagedSkill(*skill, root)
 			if err != nil {
-				fmt.Println("Error:", err)
-				return
+				return err
 			}
 			fmt.Printf("Installed %s -> %s\n", skill.Key, installedDir)
 		}
 	}
+	return nil
 }
 
 func resolvePackagedSkillKeys(requested string) ([]string, error) {

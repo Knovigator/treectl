@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"fmt"
-	"os"
 
 	"github.com/Knovigator/treectl/api"
 	"github.com/spf13/cobra"
@@ -14,7 +13,7 @@ var getThreadCmd = &cobra.Command{
 	Short:   "Get information about a specific thread",
 	Long:    `Fetch and display information about a thread using its ID.`,
 	Args:    cobra.ExactArgs(1),
-	Run:     runGetThread,
+	RunE:    runGetThread,
 }
 
 var noRehydrate bool
@@ -27,32 +26,31 @@ func init() {
 	getThreadCmd.Flags().BoolVar(&getJSONOutput, "json", false, "Output JSON instead of human-readable text")
 }
 
-func runGetThread(cmd *cobra.Command, args []string) {
+func runGetThread(cmd *cobra.Command, args []string) error {
 	threadID := args[0]
 
 	profile, err := requireAuthenticatedProfile()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		return
+		return err
 	}
 
 	threadInfo, err := api.GetThread(profile.BackendURL, threadID, profile.AccessToken, profile.Client, profile.UID)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		return
+		return err
 	}
 
 	switch resolveOutputFormat(outputFormat, getJSONOutput) {
 	case "json":
 		prettyJSON, err := api.PrettyJSON(threadInfo.Raw)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error formatting JSON: %v\n", err)
-			return
+			return fmt.Errorf("formatting JSON: %w", err)
 		}
 		fmt.Println(prettyJSON)
 	case "ascii":
 		fmt.Println(threadInfo.Quest.ToASCII())
 	default:
-		fmt.Printf("Invalid output format: %s. Use 'ascii' or 'json'.\n", outputFormat)
+		return invalidOutputFormatError(outputFormat)
 	}
+
+	return nil
 }

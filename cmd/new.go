@@ -19,7 +19,7 @@ var newReplyCmd = &cobra.Command{
 	Short:  "Create a reply in an existing thread",
 	Long:   `Create a reply answer in an existing thread.`,
 	Args:   cobra.MinimumNArgs(1),
-	Run:    runNewReply,
+	RunE:   runNewReply,
 	Hidden: true,
 }
 
@@ -54,25 +54,22 @@ func init() {
 	_ = newReplyCmd.Flags().MarkHidden("thread")
 }
 
-func runNewReply(cmd *cobra.Command, args []string) {
+func runNewReply(cmd *cobra.Command, args []string) error {
 	content := args[0]
 	if content == "" {
-		fmt.Println("Error: Content is required for a reply.")
-		return
+		return fmt.Errorf("content is required for a reply")
 	}
 
 	resolvedOutputFormat := resolveOutputFormat(createOutputFormat, createJSONOutput)
 
 	profile, err := requireAuthenticatedProfile()
 	if err != nil {
-		fmt.Println("Error:", err)
-		return
+		return err
 	}
 
 	replyToQuestID, err := normalizeReplyTarget(replyThreadID)
 	if err != nil {
-		fmt.Println("Error:", err)
-		return
+		return err
 	}
 
 	result, err := createReply(
@@ -86,11 +83,10 @@ func runNewReply(cmd *cobra.Command, args []string) {
 		},
 	)
 	if err != nil {
-		fmt.Println("Error creating reply:", err)
-		return
+		return fmt.Errorf("creating reply: %w", err)
 	}
 
-	printCreateAnswerResult(profile, result, resolvedOutputFormat)
+	return printCreateAnswerResult(profile, result, resolvedOutputFormat)
 }
 
 func createReply(profile profileConfig, options replyCreateOptions) (api.CreateAnswerResponse, error) {

@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"fmt"
-	"os"
 	"strings"
 	"time"
 
@@ -34,7 +33,7 @@ Date ranges use UTC day boundaries. end_date is exclusive when supplied.`,
   treectl get leaderboard upvalues --start-date 2026-05-25 --end-date 2026-06-01 --limit 5 --json
   treectl get leaderboard upvalues --range today -o ascii`,
 	Args: cobra.NoArgs,
-	Run:  runGetLeaderboardUpvalues,
+	RunE: runGetLeaderboardUpvalues,
 }
 
 func init() {
@@ -48,17 +47,15 @@ func init() {
 	getLeaderboardUpvaluesCmd.Flags().BoolVar(&leaderboardJSONOutput, "json", false, "Output JSON instead of human-readable text")
 }
 
-func runGetLeaderboardUpvalues(cmd *cobra.Command, args []string) {
+func runGetLeaderboardUpvalues(cmd *cobra.Command, args []string) error {
 	profile, err := requireAuthenticatedProfile()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		return
+		return err
 	}
 
 	startDate, endDate, err := resolveLeaderboardDateRange(leaderboardRange, leaderboardStartDate, leaderboardEndDate)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		return
+		return err
 	}
 
 	leaderboard, err := api.GetUpvaluedContentLeaderboard(
@@ -71,23 +68,23 @@ func runGetLeaderboardUpvalues(cmd *cobra.Command, args []string) {
 		leaderboardLimit,
 	)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		return
+		return err
 	}
 
 	switch resolveOutputFormat(leaderboardOutputFormat, leaderboardJSONOutput) {
 	case "json":
 		prettyJSON, err := api.PrettyJSON(leaderboard.Raw)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error formatting JSON: %v\n", err)
-			return
+			return fmt.Errorf("formatting JSON: %w", err)
 		}
 		fmt.Println(prettyJSON)
 	case "ascii":
 		printUpvaluedContentLeaderboardASCII(leaderboard)
 	default:
-		fmt.Fprintf(os.Stderr, "Invalid output format: %s. Use 'ascii' or 'json'.\n", leaderboardOutputFormat)
+		return invalidOutputFormatError(leaderboardOutputFormat)
 	}
+
+	return nil
 }
 
 func resolveLeaderboardDateRange(rangeName string, startDateFlag string, endDateFlag string) (string, string, error) {

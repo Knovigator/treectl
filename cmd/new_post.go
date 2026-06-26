@@ -21,7 +21,7 @@ var newPostCmd = &cobra.Command{
 		"  treectl new post --reply-to 7a5e85c9-9dca-4140-ba9a-f5db0030afca \"hello back\"\n" +
 		"  treectl new post --reply-to http://localhost:5173/quest/7a5e85c9-9dca-4140-ba9a-f5db0030afca \"hello back\"",
 	Args: cobra.MinimumNArgs(1),
-	Run:  runNewPost,
+	RunE: runNewPost,
 }
 
 var ActionCmd = &cobra.Command{
@@ -34,7 +34,7 @@ var ActionCmd = &cobra.Command{
 		"  treectl action --reply-to 7a5e85c9-9dca-4140-ba9a-f5db0030afca flux \"make this warmer\"\n" +
 		"  treectl action --reply-to http://localhost:5173/quest/7a5e85c9-9dca-4140-ba9a-f5db0030afca flux \"make this warmer\"",
 	Args:              cobra.MinimumNArgs(1),
-	Run:               runAction,
+	RunE:              runAction,
 	ValidArgsFunction: completeActionArgs,
 }
 
@@ -42,7 +42,7 @@ var actionTagsCmd = &cobra.Command{
 	Use:   "tags",
 	Short: "List model-backed action tags",
 	Long:  "List the current model-backed action tags from the authenticated backend profile.",
-	Run:   runActionTags,
+	RunE:  runActionTags,
 }
 
 var actionStatusCmd = &cobra.Command{
@@ -54,7 +54,7 @@ var actionStatusCmd = &cobra.Command{
 		"  treectl action status --post aeaacf68-d1a7-4f78-8fb0-a39c66ca1cc7\n" +
 		"  treectl action status --answer aeaacf68-d1a7-4f78-8fb0-a39c66ca1cc7 --watch",
 	Args: cobra.MaximumNArgs(1),
-	Run:  runActionStatus,
+	RunE: runActionStatus,
 }
 
 var postUrl string
@@ -178,32 +178,28 @@ func init() {
 	ActionCmd.AddCommand(actionStatusCmd)
 }
 
-func runNewPost(cmd *cobra.Command, args []string) {
+func runNewPost(cmd *cobra.Command, args []string) error {
 	content := args[0]
 	if content == "" {
-		fmt.Println("Error: Content is required for a post.")
-		return
+		return fmt.Errorf("content is required for a post")
 	}
 
 	resolvedOutputFormat := resolveOutputFormat(createOutputFormat, createJSONOutput)
 
 	profile, err := requireAuthenticatedProfile()
 	if err != nil {
-		fmt.Println("Error:", err)
-		return
+		return err
 	}
 
 	if strings.TrimSpace(postReplyTo) != "" {
 		replyToQuestID, err := normalizeReplyTarget(postReplyTo)
 		if err != nil {
-			fmt.Println("Error:", err)
-			return
+			return err
 		}
 
 		err = rejectRootOnlyPostFlags(cmd, postReplyTo)
 		if err != nil {
-			fmt.Println("Error:", err)
-			return
+			return err
 		}
 
 		result, replyErr := createReply(
@@ -217,12 +213,10 @@ func runNewPost(cmd *cobra.Command, args []string) {
 			},
 		)
 		if replyErr != nil {
-			fmt.Println("Error creating post reply:", replyErr)
-			return
+			return fmt.Errorf("creating post reply: %w", replyErr)
 		}
 
-		printCreateAnswerResult(profile, result, resolvedOutputFormat)
-		return
+		return printCreateAnswerResult(profile, result, resolvedOutputFormat)
 	}
 
 	var publicValue *bool
@@ -251,46 +245,38 @@ func runNewPost(cmd *cobra.Command, args []string) {
 		},
 	)
 	if err != nil {
-		fmt.Println("Error creating post:", err)
-		return
+		return fmt.Errorf("creating post: %w", err)
 	}
 
-	printCreateQuestResult(profile, result, resolvedOutputFormat)
+	return printCreateQuestResult(profile, result, resolvedOutputFormat)
 }
 
-func runAction(cmd *cobra.Command, args []string) {
+func runAction(cmd *cobra.Command, args []string) error {
 	invocation, err := parseActionInvocation(args)
 	if err != nil {
-		fmt.Println("Error:", err)
-		return
+		return err
 	}
 
 	if actionPollInterval <= 0 {
-		fmt.Println("Error: --poll-interval must be greater than zero.")
-		return
+		return fmt.Errorf("--poll-interval must be greater than zero")
 	}
 	if actionTimeout <= 0 {
-		fmt.Println("Error: --timeout must be greater than zero.")
-		return
+		return fmt.Errorf("--timeout must be greater than zero")
 	}
 	resolvedOutputFormat := resolveOutputFormat(actionOutputFormat, actionJSONOutput)
 
 	profile, err := requireAuthenticatedProfile()
 	if err != nil {
-		fmt.Println("Error:", err)
-		return
+		return err
 	}
 
 	validTags, err := fetchKnownActionTags(profile)
 	if err != nil {
-		fmt.Println("Error loading action tags:", err)
-		return
+		return fmt.Errorf("loading action tags: %w", err)
 	}
 
 	if !validTags[strings.ToLower(invocation.Tag)] && !actionAllowUnknownTag {
-		fmt.Printf("Error: unknown action tag %q\n", invocation.Tag)
-		fmt.Println("Run `treectl action tags` to inspect the current model-backed tags, or pass --allow-unknown-tag to submit anyway.")
-		return
+		return fmt.Errorf("unknown action tag %q; run `treectl action tags` to inspect the current model-backed tags, or pass --allow-unknown-tag to submit anyway", invocation.Tag)
 	}
 
 	var publicValue *bool
@@ -309,16 +295,16 @@ func runAction(cmd *cobra.Command, args []string) {
 		invocation,
 		publicValue,
 		privateValue,
+		resolvedOutputFormat,
 	)
 	if err != nil {
-		fmt.Println("Error:", err)
-		return
+		return err
 	}
 
-	printActionResult(actionResult, resolvedOutputFormat)
+	return printActionResult(actionResult, resolvedOutputFormat)
 }
 
-func runActionStatus(cmd *cobra.Command, args []string) {
+func runActionStatus(cmd *cobra.Command, args []string) error {
 	threadTarget := ""
 	if len(args) > 0 {
 		threadTarget = args[0]
@@ -328,35 +314,29 @@ func runActionStatus(cmd *cobra.Command, args []string) {
 	}
 
 	if strings.TrimSpace(actionStatusAnswerID) == "" && strings.TrimSpace(threadTarget) == "" {
-		fmt.Println("Error: pass a quest id/link, or use --post/--answer <post-id-or-link>.")
-		return
+		return fmt.Errorf("pass a quest id/link, or use --post/--answer <post-id-or-link>")
 	}
 	if strings.TrimSpace(actionStatusAnswerID) != "" && strings.TrimSpace(threadTarget) != "" {
-		fmt.Println("Error: pass either a quest target or --post/--answer, but not both.")
-		return
+		return fmt.Errorf("pass either a quest target or --post/--answer, but not both")
 	}
 	if actionStatusPollInterval <= 0 {
-		fmt.Println("Error: --poll-interval must be greater than zero.")
-		return
+		return fmt.Errorf("--poll-interval must be greater than zero")
 	}
 	if actionStatusTimeout <= 0 {
-		fmt.Println("Error: --timeout must be greater than zero.")
-		return
+		return fmt.Errorf("--timeout must be greater than zero")
 	}
 	resolvedOutputFormat := resolveOutputFormat(actionStatusOutputFormat, actionStatusJSONOutput)
 
 	profile, err := requireAuthenticatedProfile()
 	if err != nil {
-		fmt.Println("Error:", err)
-		return
+		return err
 	}
 
 	normalizedThreadTarget := ""
 	if strings.TrimSpace(threadTarget) != "" {
 		normalizedThreadTarget, err = normalizeThreadTarget(threadTarget)
 		if err != nil {
-			fmt.Println("Error:", err)
-			return
+			return err
 		}
 	}
 
@@ -364,15 +344,13 @@ func runActionStatus(cmd *cobra.Command, args []string) {
 	if strings.TrimSpace(actionStatusAnswerID) != "" {
 		normalizedAnswerTarget, err = normalizeAnswerTarget(actionStatusAnswerID)
 		if err != nil {
-			fmt.Println("Error:", err)
-			return
+			return err
 		}
 	}
 
 	result, err := fetchActionStatus(profile, normalizedThreadTarget, normalizedAnswerTarget)
 	if err != nil {
-		fmt.Println("Error:", err)
-		return
+		return err
 	}
 
 	if actionStatusWatch && result.Status == "pending" {
@@ -385,12 +363,11 @@ func runActionStatus(cmd *cobra.Command, args []string) {
 			actionStatusPollInterval,
 		)
 		if err != nil {
-			fmt.Println("Error:", err)
-			return
+			return err
 		}
 	}
 
-	printActionResult(result, resolvedOutputFormat)
+	return printActionResult(result, resolvedOutputFormat)
 }
 
 func createRootThread(profile profileConfig, options rootThreadCreateOptions) (api.CreateQuestResponse, error) {
@@ -509,16 +486,29 @@ func waitForGeneratedMedia(
 }
 
 func resolveRootThreadTarget(profile profileConfig, options rootThreadCreateOptions) (streamTarget, error) {
+	placementFlags := []string{}
+	if strings.TrimSpace(options.Stream) != "" {
+		placementFlags = append(placementFlags, "--stream")
+	}
+	if strings.TrimSpace(options.TeamID) != "" {
+		placementFlags = append(placementFlags, "--team-id")
+	}
+	if options.Public != nil && *options.Public {
+		placementFlags = append(placementFlags, "--public")
+	}
+	if options.Private != nil && *options.Private {
+		placementFlags = append(placementFlags, "--private")
+	}
+	if len(placementFlags) > 1 {
+		return streamTarget{}, fmt.Errorf("conflicting stream flags: %s", strings.Join(placementFlags, ", "))
+	}
+
 	if strings.TrimSpace(options.Stream) != "" {
 		return resolveStreamTarget(profile, options.Stream, defaultPrivateStreamTarget())
 	}
 
 	if strings.TrimSpace(options.TeamID) != "" {
 		return resolveStreamTarget(profile, options.TeamID, defaultPrivateStreamTarget())
-	}
-
-	if options.Public != nil && *options.Public && options.Private != nil && *options.Private {
-		return streamTarget{}, fmt.Errorf("conflicting stream flags")
 	}
 
 	if options.Public != nil && *options.Public {
@@ -536,13 +526,12 @@ func boolPtr(value bool) *bool {
 	return &value
 }
 
-func printActionResult(result actionResult, outputFormat string) {
+func printActionResult(result actionResult, outputFormat string) error {
 	switch outputFormat {
 	case "json":
 		prettyJSON, err := json.MarshalIndent(result, "", "  ")
 		if err != nil {
-			fmt.Printf("Error formatting JSON: %v\n", err)
-			return
+			return fmt.Errorf("formatting JSON: %w", err)
 		}
 		fmt.Println(string(prettyJSON))
 	case "ascii":
@@ -566,21 +555,21 @@ func printActionResult(result actionResult, outputFormat string) {
 			}
 		}
 	default:
-		fmt.Printf("Invalid output format: %s. Use 'ascii' or 'json'.\n", outputFormat)
+		return invalidOutputFormatError(outputFormat)
 	}
+
+	return nil
 }
 
-func runActionTags(cmd *cobra.Command, args []string) {
+func runActionTags(cmd *cobra.Command, args []string) error {
 	profile, err := requireAuthenticatedProfile()
 	if err != nil {
-		fmt.Println("Error:", err)
-		return
+		return err
 	}
 
 	models, err := fetchVisibleActionModels(profile)
 	if err != nil {
-		fmt.Println("Error loading action tags:", err)
-		return
+		return fmt.Errorf("loading action tags: %w", err)
 	}
 
 	groupedModels := map[string][]api.AIModelRef{}
@@ -637,6 +626,8 @@ func runActionTags(cmd *cobra.Command, args []string) {
 			}
 		}
 	}
+
+	return nil
 }
 
 func rejectRootOnlyPostFlags(cmd *cobra.Command, replyTo string) error {
@@ -794,6 +785,7 @@ func createAndMaybePollAction(
 	invocation actionInvocation,
 	publicValue *bool,
 	privateValue *bool,
+	outputFormat string,
 ) (actionResult, error) {
 	submission, err := createActionSubmission(cmd, profile, invocation, publicValue, privateValue)
 	if err != nil {
@@ -808,7 +800,7 @@ func createAndMaybePollAction(
 		profile,
 		submission.ThreadID,
 		submission.Answer.ID,
-		actionOutputFormat,
+		outputFormat,
 		actionTimeout,
 		actionPollInterval,
 	)

@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -58,5 +59,20 @@ func TestParseActionInvocationSeparatesTagAndPrompt(t *testing.T) {
 	}
 	if invocation.NormalizedContent != "!nb make this warmer" {
 		t.Fatalf("expected normalized content, got %q", invocation.NormalizedContent)
+	}
+}
+
+func TestResolveRootThreadTargetRejectsAmbiguousPlacement(t *testing.T) {
+	public := true
+
+	_, err := resolveRootThreadTarget(profileConfig{}, rootThreadCreateOptions{
+		Stream: "public",
+		Public: &public,
+	})
+	if err == nil {
+		t.Fatal("expected ambiguous placement flags to return an error")
+	}
+	if !strings.Contains(err.Error(), "--stream") || !strings.Contains(err.Error(), "--public") {
+		t.Fatalf("expected error to mention conflicting flags, got %v", err)
 	}
 }

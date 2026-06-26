@@ -13,7 +13,7 @@ var getMessagesCmd = &cobra.Command{
 	Short:   "Get information about specific messages",
 	Long:    `Fetch and display information about one or more messages using their IDs.`,
 	Args:    cobra.MinimumNArgs(1),
-	Run:     runGetMessages,
+	RunE:    runGetMessages,
 }
 
 var outputFormat string
@@ -24,27 +24,24 @@ func init() {
 	getMessagesCmd.Flags().BoolVar(&getJSONOutput, "json", false, "Output JSON instead of human-readable text")
 }
 
-func runGetMessages(cmd *cobra.Command, args []string) {
+func runGetMessages(cmd *cobra.Command, args []string) error {
 	messageIDs := args
 
 	profile, err := requireAuthenticatedProfile()
 	if err != nil {
-		fmt.Println("Error:", err)
-		return
+		return err
 	}
 
 	messagesInfo, err := api.GetMessages(profile.BackendURL, profile.AccessToken, profile.Client, profile.UID, messageIDs)
 	if err != nil {
-		fmt.Printf("Error: %v\n", err)
-		return
+		return err
 	}
 
 	switch resolveOutputFormat(outputFormat, getJSONOutput) {
 	case "json":
 		prettyJSON, err := api.PrettyJSON(messagesInfo.Raw)
 		if err != nil {
-			fmt.Printf("Error formatting JSON: %v\n", err)
-			return
+			return fmt.Errorf("formatting JSON: %w", err)
 		}
 		fmt.Println(prettyJSON)
 	case "ascii":
@@ -52,6 +49,8 @@ func runGetMessages(cmd *cobra.Command, args []string) {
 			fmt.Println(answer.ToASCII())
 		}
 	default:
-		fmt.Printf("Invalid output format: %s. Use 'ascii' or 'json'.\n", outputFormat)
+		return invalidOutputFormatError(outputFormat)
 	}
+
+	return nil
 }

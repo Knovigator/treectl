@@ -11,7 +11,7 @@ var newClipCmd = &cobra.Command{
 	Short: "Create a new clip",
 	Long:  `Create a new clip from a URL or with an attachment.`,
 	Args:  cobra.MaximumNArgs(1),
-	Run:   runNewClip,
+	RunE:  runNewClip,
 }
 
 var clipContent string
@@ -26,7 +26,7 @@ func init() {
 	newClipCmd.Flags().BoolVar(&createJSONOutput, "json", false, "Output JSON instead of human-readable text")
 }
 
-func runNewClip(cmd *cobra.Command, args []string) {
+func runNewClip(cmd *cobra.Command, args []string) error {
 	var url string
 	if len(args) > 0 {
 		url = args[0]
@@ -35,8 +35,7 @@ func runNewClip(cmd *cobra.Command, args []string) {
 
 	profile, err := requireAuthenticatedProfile()
 	if err != nil {
-		fmt.Println("Error:", err)
-		return
+		return err
 	}
 
 	target, err := resolveStreamTarget(profile, clipStream, streamTarget{
@@ -45,9 +44,13 @@ func runNewClip(cmd *cobra.Command, args []string) {
 		Name: "Clips",
 	})
 	if err != nil {
-		fmt.Println("Error:", err)
-		return
+		return err
 	}
 
-	clipLink(url, clipContent, clipAttachment, target, resolvedOutputFormat)
+	result, err := createClipQuest(profile, url, clipContent, clipAttachment, target)
+	if err != nil {
+		return fmt.Errorf("creating clip: %w", err)
+	}
+
+	return printCreateQuestResult(profile, result, resolvedOutputFormat)
 }

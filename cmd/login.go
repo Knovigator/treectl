@@ -65,7 +65,7 @@ var LoginCmd = &cobra.Command{
 	Use:   "login",
 	Short: "Log in to your account",
 	Long:  `Authenticate and log in to your tree account to access protected features.`,
-	Run:   runLogin,
+	RunE:  runLogin,
 }
 
 var ProfileCmd = &cobra.Command{
@@ -77,21 +77,21 @@ var ProfileCmd = &cobra.Command{
 var profileListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List available profiles",
-	Run:   runProfileList,
+	RunE:  runProfileList,
 }
 
 var profileUseCmd = &cobra.Command{
 	Use:   "use [profile]",
 	Short: "Select the active profile",
 	Args:  cobra.ExactArgs(1),
-	Run:   runProfileUse,
+	RunE:  runProfileUse,
 }
 
 var profileShowCmd = &cobra.Command{
 	Use:   "show [profile]",
 	Short: "Show the resolved profile configuration",
 	Args:  cobra.MaximumNArgs(1),
-	Run:   runProfileShow,
+	RunE:  runProfileShow,
 }
 
 func init() {
@@ -105,36 +105,31 @@ func init() {
 	profileShowCmd.Flags().BoolVar(&profileShowJSON, "json", false, "Output JSON instead of human-readable text")
 }
 
-func runLogin(cmd *cobra.Command, args []string) {
+func runLogin(cmd *cobra.Command, args []string) error {
 	profileName := resolveProfileName()
 	profile, err := resolveProfile(profileName)
 	if err != nil {
-		fmt.Println("Login failed:", err)
-		return
+		return fmt.Errorf("login failed: %w", err)
 	}
 
 	email, err := resolveEmail()
 	if err != nil {
-		fmt.Println("Login failed:", err)
-		return
+		return fmt.Errorf("login failed: %w", err)
 	}
 
 	password, err := resolvePassword()
 	if err != nil {
-		fmt.Println("Login failed:", err)
-		return
+		return fmt.Errorf("login failed: %w", err)
 	}
 
 	tokens, err := performLogin(profile.BackendURL, email, password)
 	if err != nil {
-		fmt.Println("Login failed:", err)
-		return
+		return fmt.Errorf("login failed: %w", err)
 	}
 
 	bootstrap, err := fetchBootstrap(profile.BackendURL, tokens)
 	if err != nil {
-		fmt.Println("Login failed:", err)
-		return
+		return fmt.Errorf("login failed: %w", err)
 	}
 
 	profile.AccessToken = tokens.AccessToken
@@ -147,14 +142,14 @@ func runLogin(cmd *cobra.Command, args []string) {
 
 	err = saveProfile(profile, true)
 	if err != nil {
-		fmt.Println("Error saving profile:", err)
-		return
+		return fmt.Errorf("saving profile: %w", err)
 	}
 
 	fmt.Printf("Login successful. Profile: %s Backend: %s\n", profile.Name, profile.BackendURL)
+	return nil
 }
 
-func runProfileList(cmd *cobra.Command, args []string) {
+func runProfileList(cmd *cobra.Command, args []string) error {
 	activeProfile := resolveProfileName()
 	profileNames := allProfileNames()
 
@@ -177,25 +172,26 @@ func runProfileList(cmd *cobra.Command, args []string) {
 
 		fmt.Printf("%s %s\t%s\t%s\n", marker, profile.Name, profile.BackendURL, loginState)
 	}
+
+	return nil
 }
 
-func runProfileUse(cmd *cobra.Command, args []string) {
+func runProfileUse(cmd *cobra.Command, args []string) error {
 	profileName := normalizeProfileName(args[0])
 	if _, err := resolveProfile(profileName); err != nil {
-		fmt.Println("Error:", err)
-		return
+		return err
 	}
 
 	err := setActiveProfile(profileName)
 	if err != nil {
-		fmt.Println("Error:", err)
-		return
+		return err
 	}
 
 	fmt.Printf("Active profile set to %s\n", profileName)
+	return nil
 }
 
-func runProfileShow(cmd *cobra.Command, args []string) {
+func runProfileShow(cmd *cobra.Command, args []string) error {
 	profileName := resolveProfileName()
 	if len(args) == 1 {
 		profileName = normalizeProfileName(args[0])
@@ -203,8 +199,7 @@ func runProfileShow(cmd *cobra.Command, args []string) {
 
 	profile, err := resolveProfile(profileName)
 	if err != nil {
-		fmt.Println("Error:", err)
-		return
+		return err
 	}
 
 	redactedProfile := profile
@@ -215,12 +210,11 @@ func runProfileShow(cmd *cobra.Command, args []string) {
 	if profileShowJSON {
 		prettyJSON, err := json.MarshalIndent(redactedProfile, "", "  ")
 		if err != nil {
-			fmt.Println("Error formatting profile:", err)
-			return
+			return fmt.Errorf("formatting profile: %w", err)
 		}
 
 		fmt.Println(string(prettyJSON))
-		return
+		return nil
 	}
 
 	loginState := "signed-out"
@@ -252,6 +246,8 @@ func runProfileShow(cmd *cobra.Command, args []string) {
 	if redactedProfile.Expiry != "" {
 		fmt.Printf("Expiry: %s\n", redactedProfile.Expiry)
 	}
+
+	return nil
 }
 
 func builtInProfiles() map[string]profileConfig {
@@ -558,7 +554,7 @@ func saveProfile(profile profileConfig, setActive bool) error {
 		return err
 	}
 
-	err = os.MkdirAll(filepath.Dir(configPath), 0755)
+	err = os.MkdirAll(filepath.Dir(configPath), 0700)
 	if err != nil {
 		return err
 	}
@@ -582,14 +578,20 @@ func saveProfile(profile profileConfig, setActive bool) error {
 
 	statErr := error(nil)
 	if _, statErr = os.Stat(configPath); statErr == nil {
-		return viper.WriteConfig()
+		if err := viper.WriteConfig(); err != nil {
+			return err
+		}
+		return os.Chmod(configPath, 0600)
 	}
 
 	if !os.IsNotExist(statErr) {
 		return statErr
 	}
 
-	return viper.SafeWriteConfigAs(configPath)
+	if err := viper.SafeWriteConfigAs(configPath); err != nil {
+		return err
+	}
+	return os.Chmod(configPath, 0600)
 }
 
 func configFilePath() (string, error) {
