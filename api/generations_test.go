@@ -78,6 +78,7 @@ func TestCreateGenerationUsesCallerTimeout(t *testing.T) {
 		"flux",
 		"wide hero",
 		nil,
+		false,
 		20*time.Millisecond,
 	)
 	if err == nil {

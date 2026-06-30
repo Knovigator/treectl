@@ -12,14 +12,39 @@ import (
 
 // GenerationResponse is the payload from the direct (post-less) generation endpoints.
 type GenerationResponse struct {
-	ID        string                 `json:"id"`
-	Status    string                 `json:"status"`
-	Tag       string                 `json:"tag"`
-	Source    string                 `json:"source"`
-	MediaURLs []string               `json:"media_urls"`
-	Failure   map[string]interface{} `json:"failure,omitempty"`
-	Error     string                 `json:"error,omitempty"`
-	Raw       []byte                 `json:"-"`
+	ID         string                 `json:"id"`
+	Status     string                 `json:"status"`
+	Tag        string                 `json:"tag"`
+	Source     string                 `json:"source"`
+	Provider   string                 `json:"provider,omitempty"`
+	MediaURLs  []string               `json:"media_urls"`
+	AmountSats int64                  `json:"amount_sats,omitempty"`
+	AmountUSD  float64                `json:"amount_usd,omitempty"`
+	Quote      *GenerationQuote       `json:"quote,omitempty"`
+	Failure    map[string]interface{} `json:"failure,omitempty"`
+	Error      string                 `json:"error,omitempty"`
+	Raw        []byte                 `json:"-"`
+}
+
+// GenerationQuote is the price for a generation, returned when quote=true (no media is produced).
+type GenerationQuote struct {
+	AmountSats int64   `json:"amount_sats"`
+	AmountUSD  float64 `json:"amount_usd"`
+	Tag        string  `json:"tag"`
+	Provider   string  `json:"provider,omitempty"`
+}
+
+// TagInfo describes one model tag available to the direct generation endpoint and what it accepts.
+type TagInfo struct {
+	Tag                  string   `json:"tag"`
+	Provider             string   `json:"provider"`
+	Kind                 string   `json:"kind"` // image | audio | video
+	Async                bool     `json:"async"`
+	AcceptsReference     bool     `json:"accepts_reference"`
+	SupportsInstrumental bool     `json:"supports_instrumental"`
+	DurationMin          int      `json:"duration_min,omitempty"`
+	DurationMax          int      `json:"duration_max,omitempty"`
+	Inputs               []string `json:"inputs,omitempty"`
 }
 
 // CreateGeneration runs a direct AI generation that charges the user and returns media
@@ -32,11 +57,15 @@ func CreateGeneration(
 	tag string,
 	prompt string,
 	settings map[string]interface{},
+	quote bool,
 	timeout time.Duration,
 ) (GenerationResponse, error) {
 	body := map[string]interface{}{"tag": tag, "prompt": prompt}
 	if len(settings) > 0 {
 		body["settings"] = settings
+	}
+	if quote {
+		body["quote"] = true
 	}
 
 	resp, err := newRequestWithTimeout(accessToken, client, uid, timeout).
@@ -134,4 +163,31 @@ func shouldSendTreechatAuth(requestURL, backendURL string) bool {
 	return strings.EqualFold(parsedRequestURL.Scheme, parsedBackendURL.Scheme) &&
 		strings.EqualFold(parsedRequestURL.Host, parsedBackendURL.Host) &&
 		strings.HasPrefix(parsedRequestURL.EscapedPath(), "/api/")
+}
+
+// ListGenerationTags fetches the model tags the direct generation endpoint supports and what each
+// accepts. GET /api/v1/ai/generations/tags.
+func ListGenerationTags(backendURL, accessToken, client, uid string) ([]TagInfo, error) {
+	resp, err := newRequest(accessToken, client, uid).
+		SetHeader("accept", "application/json").
+		Get(fmt.Sprintf("%s/api/v1/ai/generations/tags", backendURL))
+	if err != nil {
+		return nil, fmt.Errorf("error making request: %w", err)
+	}
+	if resp.StatusCode() != http.StatusOK {
+		return nil, fmt.Errorf("status %d: %s", resp.StatusCode(), resp.Body())
+	}
+
+	// Accept either a bare array or {"tags": [...]}.
+	var wrapped struct {
+		Tags []TagInfo `json:"tags"`
+	}
+	if err := json.Unmarshal(resp.Body(), &wrapped); err == nil && len(wrapped.Tags) > 0 {
+		return wrapped.Tags, nil
+	}
+	var bare []TagInfo
+	if err := json.Unmarshal(resp.Body(), &bare); err != nil {
+		return nil, fmt.Errorf("parsing tags response: %w", err)
+	}
+	return bare, nil
 }
